@@ -197,3 +197,42 @@ def test_reset_clears_breach_state():
     # After reset, going back to 14 should NOT produce a "resolved" alert
     alerts = checker.check(_sample(value=14.0))
     assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Multi-instrument breach-state isolation (source_index)
+# ------------------------------------------------------------------
+
+def test_independent_breach_state_per_source_index():
+    """PSU-0 and PSU-1 breach states are tracked independently."""
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    s0_breach = TelemetrySample(time.time(), "PSU", "voltage", 16.0, "V", source_index=0)
+    s1_ok     = TelemetrySample(time.time(), "PSU", "voltage", 14.0, "V", source_index=1)
+    s1_breach = TelemetrySample(time.time(), "PSU", "voltage", 16.0, "V", source_index=1)
+
+    alerts0 = checker.check(s0_breach)       # PSU-0 breaches → alert
+    assert len(alerts0) == 1
+    assert "UPPER LIMIT BREACH" in alerts0[0]
+
+    alerts1_ok = checker.check(s1_ok)        # PSU-1 in range → no alert
+    assert alerts1_ok == []
+
+    alerts1_breach = checker.check(s1_breach)  # PSU-1 breaches independently → alert
+    assert len(alerts1_breach) == 1
+    assert "UPPER LIMIT BREACH" in alerts1_breach[0]
+
+
+def test_breach_state_not_shared_across_source_indices():
+    """A breach on PSU-0 must not suppress the first breach alert on PSU-1."""
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    s0_breach = TelemetrySample(time.time(), "PSU", "voltage", 16.0, "V", source_index=0)
+    s1_breach = TelemetrySample(time.time(), "PSU", "voltage", 16.0, "V", source_index=1)
+
+    checker.check(s0_breach)  # PSU-0 in breach — state_key "PSU_0_voltage_upper" = True
+
+    # PSU-1 has never breached: its state_key "PSU_1_voltage_upper" is still False
+    alerts = checker.check(s1_breach)
+    assert len(alerts) == 1, (
+        "PSU-1 must alert even though PSU-0 is already in breach; "
+        "state keys must include source_index to prevent cross-instrument contamination."
+    )

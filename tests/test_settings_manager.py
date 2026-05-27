@@ -123,8 +123,30 @@ def test_migration_from_old_single_visa_fields(tmp_path):
     assert mgr.poll_rate_hz == 2.0
 
 
-def test_psu_only_mode_saves_empty_load_list(tmp_path):
-    """An empty load_visa_strings list round-trips correctly (PSU-only mode)."""
+def test_migration_empty_load_visa_string_becomes_no_load_mode(tmp_path):
+    """Old config with an empty load_visa_string migrates to no_load_mode=True."""
+    import src.config.settings_manager as sm_module
+    sm_module.CONFIG_FILE = tmp_path / "config.json"
+    sm_module.LOGS_DIR = tmp_path / "logs"
+
+    old_config = {
+        "psu_visa_string": "USB0::0x0957::INSTR",
+        "load_visa_string": "",   # user had no load configured
+        "poll_rate_hz": 1.0,
+    }
+    (tmp_path / "config.json").write_text(json.dumps(old_config), encoding="utf-8")
+
+    from src.config.settings_manager import SettingsManager
+    mgr = SettingsManager()
+    mgr.load()
+
+    assert mgr.psu_visa_strings == ["USB0::0x0957::INSTR"]
+    assert mgr.load_visa_strings == []
+    assert mgr.no_load_mode is True
+
+
+def test_psu_only_mode_saves_and_restores(tmp_path):
+    """PSU-only mode: no_load_mode flag and load VISA strings both round-trip."""
     import src.config.settings_manager as sm_module
     sm_module.CONFIG_FILE = tmp_path / "config.json"
     sm_module.LOGS_DIR = tmp_path / "logs"
@@ -133,13 +155,31 @@ def test_psu_only_mode_saves_empty_load_list(tmp_path):
     mgr = SettingsManager()
     mgr.load()
     mgr.psu_visa_strings = ["USB0::0x0957::INSTR"]
-    mgr.load_visa_strings = []  # PSU-only
+    mgr.load_visa_strings = ["USB0::0x2A45::INSTR"]  # VISA string preserved even in PSU-only
+    mgr.no_load_mode = True
     mgr.save()
 
     mgr2 = SettingsManager()
     mgr2.load()
     assert mgr2.psu_visa_strings == ["USB0::0x0957::INSTR"]
-    assert mgr2.load_visa_strings == []
+    assert mgr2.no_load_mode is True
+    assert mgr2.load_visa_strings == ["USB0::0x2A45::INSTR"]  # not discarded
+
+
+def test_backward_compat_empty_load_visas_implies_no_load_mode(tmp_path):
+    """Old configs with load_visa_strings=[] are auto-migrated to no_load_mode=True."""
+    import src.config.settings_manager as sm_module
+    sm_module.CONFIG_FILE = tmp_path / "config.json"
+    sm_module.LOGS_DIR = tmp_path / "logs"
+
+    (tmp_path / "config.json").write_text(
+        json.dumps({"load_visa_strings": [], "poll_rate_hz": 1.0}), encoding="utf-8"
+    )
+
+    from src.config.settings_manager import SettingsManager
+    mgr = SettingsManager()
+    mgr.load()
+    assert mgr.no_load_mode is True
 
 
 def test_unknown_keys_ignored(tmp_path):

@@ -185,7 +185,11 @@ class TestController(QObject):
         # Stop poller
         if self._poller:
             self._poller.stop_polling()
-            self._poller.wait(3000)  # up to 3s for clean exit
+            if not self._poller.wait(5000):  # up to 5 s for clean exit
+                self._log(
+                    "Warning: poller thread did not stop within 5 s — "
+                    "proceeding with teardown. Instrument state may be undefined."
+                )
             self._poller = None
 
         # Optionally control instrument output/input state

@@ -38,7 +38,8 @@ LOGS_DIR: Path = APP_ROOT / "logs"
 
 _DEFAULTS: dict[str, Any] = {
     "psu_visa_strings": [""],        # list of PSU VISA addresses (≥1)
-    "load_visa_strings": [""],       # list of Load VISA addresses (0 = PSU-only)
+    "load_visa_strings": [""],       # list of Load VISA addresses (rows preserved even in PSU-only)
+    "no_load_mode": False,           # True = PSU-only test; load rows hidden but VISA strings kept
     "poll_rate_hz": 1.0,
     "teams_webhook_url": "",
     "log_directory": str(LOGS_DIR),
@@ -73,6 +74,8 @@ class SettingsManager:
         # Instrument connection — lists support multiple instruments
         self.psu_visa_strings: list[str] = _DEFAULTS["psu_visa_strings"][:]
         self.load_visa_strings: list[str] = _DEFAULTS["load_visa_strings"][:]
+        # PSU-only mode flag: load rows are hidden but VISA strings are preserved
+        self.no_load_mode: bool = _DEFAULTS["no_load_mode"]
 
         # Polling
         self.poll_rate_hz: float = _DEFAULTS["poll_rate_hz"]
@@ -132,10 +135,17 @@ class SettingsManager:
             val = raw["load_visa_strings"]
             self.load_visa_strings = val if isinstance(val, list) else [str(val)]
         elif "load_visa_string" in raw:
-            # Migrate old single-string field
-            self.load_visa_strings = [raw["load_visa_string"]]
+            # Migrate old single-string field; empty string means no load was configured
+            val = raw["load_visa_string"]
+            self.load_visa_strings = [val] if val.strip() else []
         else:
             self.load_visa_strings = _DEFAULTS["load_visa_strings"][:]
+
+        # -- No-load mode (added in v2) --
+        self.no_load_mode = bool(raw.get("no_load_mode", False))
+        # Backward compat: old configs recorded PSU-only as load_visa_strings=[]
+        if not self.no_load_mode and "no_load_mode" not in raw and self.load_visa_strings == []:
+            self.no_load_mode = True
 
         self.poll_rate_hz = float(raw.get("poll_rate_hz", _DEFAULTS["poll_rate_hz"]))
         self.teams_webhook_url = raw.get("teams_webhook_url", _DEFAULTS["teams_webhook_url"])
@@ -160,6 +170,7 @@ class SettingsManager:
         data = {
             "psu_visa_strings": self.psu_visa_strings,
             "load_visa_strings": self.load_visa_strings,
+            "no_load_mode": self.no_load_mode,
             "poll_rate_hz": self.poll_rate_hz,
             "teams_webhook_url": self.teams_webhook_url,
             "log_directory": self.log_directory,
@@ -192,6 +203,7 @@ class SettingsManager:
         """Reset all fields to their default values."""
         self.psu_visa_strings = _DEFAULTS["psu_visa_strings"][:]
         self.load_visa_strings = _DEFAULTS["load_visa_strings"][:]
+        self.no_load_mode = _DEFAULTS["no_load_mode"]
         self.poll_rate_hz = _DEFAULTS["poll_rate_hz"]
         self.teams_webhook_url = _DEFAULTS["teams_webhook_url"]
         self.log_directory = _DEFAULTS["log_directory"]

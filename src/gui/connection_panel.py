@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -257,24 +258,30 @@ class ConnectionPanel(QGroupBox):
         for visa in psu_visas:
             self._add_psu_row(visa)
 
-        load_visas = self._settings.load_visa_strings
-        if load_visas is None or load_visas == []:
-            # No-load mode was explicitly saved
+        load_visas = self._settings.load_visa_strings or [""]
+        for visa in load_visas:
+            self._add_load_row(visa)
+
+        # Restore no-load mode without triggering _on_no_load_toggled (which would
+        # call _save_to_settings and potentially overwrite load VISA strings)
+        if self._settings.no_load_mode:
+            self._no_load_check.blockSignals(True)
             self._no_load_check.setChecked(True)
-        else:
-            for visa in load_visas:
-                self._add_load_row(visa)
+            self._no_load_check.blockSignals(False)
+            self._load_container.setVisible(False)
+            self._add_load_btn.setEnabled(False)
 
     def _save_to_settings(self) -> None:
         self._settings.psu_visa_strings = [
             f.text().strip() for _, _, f in self._psu_rows
         ]
-        if self._no_load_check.isChecked():
-            self._settings.load_visa_strings = []
-        else:
-            self._settings.load_visa_strings = [
-                f.text().strip() for _, _, f in self._load_rows
-            ]
+        # Always persist load row values regardless of no-load mode, so that
+        # VISA strings survive across no-load toggle on/off and app restarts.
+        # The no_load_mode flag separately records whether PSU-only is active.
+        self._settings.load_visa_strings = [
+            f.text().strip() for _, _, f in self._load_rows
+        ]
+        self._settings.no_load_mode = self._no_load_check.isChecked()
         self._settings.save()
 
     def _on_no_load_toggled(self, checked: bool) -> None:
@@ -333,4 +340,14 @@ class ConnectionPanel(QGroupBox):
                 for _, _, f in self._load_rows
                 if f.text().strip()
             ]
+
+        # Warn if blank PSU rows were silently skipped
+        blank_psus = len(self._psu_rows) - len(psu_visas)
+        if psu_visas and blank_psus > 0:
+            QMessageBox.warning(
+                self, "Blank PSU Rows",
+                f"{blank_psus} PSU row(s) had no address and will be skipped.\n"
+                f"Connecting to {len(psu_visas)} PSU(s).",
+            )
+
         self.connect_requested.emit(psu_visas, load_visas)

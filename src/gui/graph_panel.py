@@ -92,6 +92,7 @@ class _PlotGroup(QGroupBox):
         self._ts:     dict[tuple, deque] = {}
         self._vals:   dict[tuple, deque] = {}
         self._curves: dict[tuple, pg.PlotDataItem] = {}
+        self._units:  dict[tuple, str] = {}   # last seen unit per curve (for CSV export)
 
         # Dashed limit lines: key = "parameter_min" / "parameter_max"
         self._limit_lines: dict[str, pg.InfiniteLine] = {}
@@ -109,6 +110,7 @@ class _PlotGroup(QGroupBox):
         key = (sample.source_index, sample.parameter)
         if key not in self._curves:
             self._create_curve(sample.source_index, sample.parameter)
+        self._units[key] = sample.unit  # track for CSV export
         self._ts[key].append(sample.timestamp)
         self._vals[key].append(sample.value)
 
@@ -173,9 +175,10 @@ class _PlotGroup(QGroupBox):
         now = time.time()
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["timestamp", "source", "source_index", "parameter", "value"])
+            writer.writerow(["timestamp", "source", "source_index", "parameter", "value", "unit"])
             for (src_idx, param), ts_buf in self._ts.items():
                 vs_buf = self._vals[(src_idx, param)]
+                unit = self._units.get((src_idx, param), "")
                 for t, v in zip(ts_buf, vs_buf):
                     if window_seconds > 0 and t < now - window_seconds:
                         continue
@@ -185,6 +188,7 @@ class _PlotGroup(QGroupBox):
                         src_idx,
                         param,
                         f"{v:.6g}",
+                        unit,
                     ])
 
     # ------------------------------------------------------------------

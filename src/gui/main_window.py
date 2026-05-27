@@ -293,7 +293,23 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-        self._controller.connect_instruments(psus, loads)
+        try:
+            self._controller.connect_instruments(psus, loads)
+        except Exception as exc:
+            # Defensive: clean up already-opened VISA connections before surfacing
+            # the error (e.g. rapid double-click where state is no longer DISCONNECTED)
+            for p in psus:
+                try:
+                    p.disconnect()
+                except Exception:
+                    pass
+            for ld in loads:
+                try:
+                    ld.disconnect()
+                except Exception:
+                    pass
+            QMessageBox.critical(self, "Connection Failed", str(exc))
+            return
         self._create_instrument_panels(len(psus), len(loads))
 
     def _on_disconnect_requested(self) -> None:
