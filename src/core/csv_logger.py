@@ -25,7 +25,7 @@ class CsvLogger:
         logger.stop()
     """
 
-    COLUMNS = ("timestamp", "source", "parameter", "value", "unit")
+    COLUMNS = ("timestamp", "source", "source_index", "parameter", "value", "unit")
 
     def __init__(self, log_dir: Path) -> None:
         self._log_dir = log_dir
@@ -79,6 +79,7 @@ class CsvLogger:
             {
                 "timestamp": iso_ts,
                 "source": sample.source,
+                "source_index": sample.source_index,
                 "parameter": sample.parameter,
                 "value": f"{sample.value:.6g}",
                 "unit": sample.unit,

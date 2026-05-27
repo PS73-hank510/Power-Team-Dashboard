@@ -41,7 +41,7 @@ def test_header_row(tmp_path):
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
-    assert header == ["timestamp", "source", "parameter", "value", "unit"]
+    assert header == ["timestamp", "source", "source_index", "parameter", "value", "unit"]
 
 
 def test_write_appends_row(tmp_path):

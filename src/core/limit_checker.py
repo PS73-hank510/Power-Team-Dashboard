@@ -89,7 +89,7 @@ class LimitChecker:
         side: str,          # "upper" or "lower"
         in_breach: bool,
     ) -> list[str]:
-        state_key = f"{sample.source}_{sample.parameter}_{side}"
+        state_key = f"{sample.source}_{sample.source_index}_{sample.parameter}_{side}"
         was_in_breach = self._breach_state.get(state_key, False)
         self._breach_state[state_key] = in_breach
 

@@ -280,6 +280,9 @@ class ConnectionPanel(QGroupBox):
     def _on_no_load_toggled(self, checked: bool) -> None:
         self._load_container.setVisible(not checked)
         self._add_load_btn.setEnabled(not checked)
+        # If user unchecks "No load" and there are no rows yet, add a blank one
+        if not checked and not self._load_rows:
+            self._add_load_row("")
         self._save_to_settings()
 
     # ------------------------------------------------------------------

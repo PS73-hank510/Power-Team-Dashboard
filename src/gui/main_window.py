@@ -299,10 +299,9 @@ class MainWindow(QMainWindow):
     def _on_disconnect_requested(self) -> None:
         try:
             self._controller.disconnect_instruments()
+            self._clear_instrument_panels()
         except ValueError as exc:
             QMessageBox.warning(self, "Cannot Disconnect", str(exc))
-        finally:
-            self._clear_instrument_panels()
 
     def _on_start_requested(self) -> None:
         try:
