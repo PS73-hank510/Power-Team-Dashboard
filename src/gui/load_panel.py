@@ -35,9 +35,11 @@ class LoadPanel(QGroupBox):
 
     mode_changed = pyqtSignal(str, float)
 
-    def __init__(self, settings: SettingsManager, parent=None) -> None:
-        super().__init__("Electronic Load", parent)
+    def __init__(self, settings: SettingsManager, index: int = 0, parent=None) -> None:
+        title = f"Electronic Load {index + 1}" if index > 0 else "Electronic Load"
+        super().__init__(title, parent)
         self._settings = settings
+        self._index = index
         self._build_ui()
         self._load_from_settings()
 

@@ -4,12 +4,13 @@ Owns the TestState machine, starts/stops the PollWorker, opens/closes the
 CsvLogger, dispatches telemetry through the LimitChecker, and forwards
 alerts to TeamsNotifier.
 
+Supports variable numbers of power supplies and loads (0 loads = PSU-only).
+
 State transitions:
     DISCONNECTED → CONNECTED  (instruments connected)
     CONNECTED    → RUNNING    (test started)
     RUNNING      → STOPPED    (test stopped)
     STOPPED      → CONNECTED  (ready for another test)
-    RUNNING      → CONNECTED  (emergency stop / reconnect)
 
 Signals emitted (for GUI consumption):
     state_changed(TestState):   Any state transition.
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -53,8 +54,8 @@ class TestController(QObject):
         self._settings = settings
         self._state = TestState.DISCONNECTED
 
-        self._psu: Optional[PowerSupply] = None
-        self._load: Optional[ElectronicLoad] = None
+        self._psus: List[PowerSupply] = []
+        self._loads: List[ElectronicLoad] = []
         self._poller: Optional[PollWorker] = None
         self._logger: Optional[CsvLogger] = None
         self._checker: LimitChecker = LimitChecker()
@@ -72,30 +73,48 @@ class TestController(QObject):
     # Connection management
     # ------------------------------------------------------------------
 
-    def connect_instruments(self, psu: PowerSupply, load: ElectronicLoad) -> None:
+    def connect_instruments(
+        self,
+        psus: List[PowerSupply],
+        loads: List[ElectronicLoad],
+    ) -> None:
         """Transition DISCONNECTED → CONNECTED with the given instruments.
 
-        Raises ValueError if not in DISCONNECTED state.
+        Args:
+            psus:  One or more connected PowerSupply instances.
+            loads: Zero or more connected ElectronicLoad instances.
+                   An empty list enables PSU-only mode.
+
+        Raises ValueError if not in DISCONNECTED state or if psus is empty.
         """
         self._require_state(TestState.DISCONNECTED)
-        self._psu = psu
-        self._load = load
+        if not psus:
+            raise ValueError("At least one power supply must be provided.")
+        self._psus = list(psus)
+        self._loads = list(loads)
         self._transition(TestState.CONNECTED)
-        self._log("Instruments connected.")
+        load_desc = f"{len(loads)} load(s)" if loads else "no load (PSU-only)"
+        self._log(f"Instruments connected: {len(psus)} PSU(s), {load_desc}.")
 
     def disconnect_instruments(self) -> None:
-        """Disconnect from instruments. Must be in CONNECTED or STOPPED state."""
+        """Disconnect from all instruments. Must be in CONNECTED or STOPPED state."""
         if self._state not in (TestState.CONNECTED, TestState.STOPPED):
             raise ValueError(
                 f"Cannot disconnect in state {self._state.name}. "
                 "Stop the test first."
             )
-        if self._psu:
-            self._psu.disconnect()
-        if self._load:
-            self._load.disconnect()
-        self._psu = None
-        self._load = None
+        for psu in self._psus:
+            try:
+                psu.disconnect()
+            except Exception:
+                pass
+        for load in self._loads:
+            try:
+                load.disconnect()
+            except Exception:
+                pass
+        self._psus = []
+        self._loads = []
         self._transition(TestState.DISCONNECTED)
         self._log("Instruments disconnected.")
 
@@ -125,22 +144,24 @@ class TestController(QObject):
         self._checker = LimitChecker(dict(self._settings.limits))
 
         # Optionally control instrument output/input state
-        if self._settings.control_psu_output and self._psu:
-            try:
-                self._psu.output_on()
-            except Exception as exc:
-                self._log(f"Warning: Could not enable PSU output: {exc}")
+        if self._settings.control_psu_output:
+            for psu in self._psus:
+                try:
+                    psu.output_on()
+                except Exception as exc:
+                    self._log(f"Warning: Could not enable PSU output: {exc}")
 
-        if self._settings.control_load_input and self._load:
-            try:
-                self._load.input_on()
-            except Exception as exc:
-                self._log(f"Warning: Could not enable Load input: {exc}")
+        if self._settings.control_load_input:
+            for load in self._loads:
+                try:
+                    load.input_on()
+                except Exception as exc:
+                    self._log(f"Warning: Could not enable Load input: {exc}")
 
-        # Start poller
+        # Start poller with all instruments
         self._poller = PollWorker(
-            psu=self._psu,
-            load=self._load,
+            psus=self._psus,
+            loads=self._loads,
             poll_rate_hz=self._settings.poll_rate_hz,
             load_mode=self._settings.last_load_mode,
         )
@@ -168,17 +189,19 @@ class TestController(QObject):
             self._poller = None
 
         # Optionally control instrument output/input state
-        if self._settings.control_load_input and self._load:
-            try:
-                self._load.input_off()
-            except Exception as exc:
-                self._log(f"Warning: Could not disable Load input: {exc}")
+        if self._settings.control_load_input:
+            for load in self._loads:
+                try:
+                    load.input_off()
+                except Exception as exc:
+                    self._log(f"Warning: Could not disable Load input: {exc}")
 
-        if self._settings.control_psu_output and self._psu:
-            try:
-                self._psu.output_off()
-            except Exception as exc:
-                self._log(f"Warning: Could not disable PSU output: {exc}")
+        if self._settings.control_psu_output:
+            for psu in self._psus:
+                try:
+                    psu.output_off()
+                except Exception as exc:
+                    self._log(f"Warning: Could not disable PSU output: {exc}")
 
         # Close logger
         if self._logger:

@@ -26,11 +26,14 @@ class TelemetrySample:
     """A single timestamped measurement from one instrument.
 
     Attributes:
-        timestamp: Unix timestamp (time.time()) when the sample was taken.
-        source:    Instrument identifier — "PSU" or "LOAD".
-        parameter: Measurement name — "voltage", "current", "power".
-        value:     The numeric measurement value.
-        unit:      SI unit string — "V", "A", "W", "Ω".
+        timestamp:    Unix timestamp (time.time()) when the sample was taken.
+        source:       Instrument type — "PSU" or "LOAD".
+        parameter:    Measurement name — "voltage", "current", "power".
+        value:        The numeric measurement value.
+        unit:         SI unit string — "V", "A", "W", "Ω".
+        source_index: 0-based index within the instrument type (supports
+                      multiple PSUs or loads). Defaults to 0 for
+                      single-instrument setups.
     """
 
     timestamp: float
@@ -38,9 +41,17 @@ class TelemetrySample:
     parameter: str    # "voltage", "current", "power"
     value: float
     unit: str         # "V", "A", "W", "Ω"
+    source_index: int = 0  # instrument index within its type (0-based)
 
     @classmethod
-    def now(cls, source: str, parameter: str, value: float, unit: str) -> "TelemetrySample":
+    def now(
+        cls,
+        source: str,
+        parameter: str,
+        value: float,
+        unit: str,
+        source_index: int = 0,
+    ) -> "TelemetrySample":
         """Convenience constructor that stamps with the current time."""
         return cls(
             timestamp=time.time(),
@@ -48,6 +59,7 @@ class TelemetrySample:
             parameter=parameter,
             value=value,
             unit=unit,
+            source_index=source_index,
         )
 
 

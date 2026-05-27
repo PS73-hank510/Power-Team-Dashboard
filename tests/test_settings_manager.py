@@ -63,7 +63,8 @@ def test_round_trip_save_load(tmp_path):
 
     mgr = SettingsManager()
     mgr.load()
-    mgr.psu_visa_string = "USB0::0x1234::INSTR"
+    mgr.psu_visa_strings = ["USB0::0x1234::INSTR", "GPIB0::5::INSTR"]
+    mgr.load_visa_strings = ["USB0::0xABCD::INSTR"]
     mgr.poll_rate_hz = 5.0
     mgr.teams_webhook_url = "https://example.com/webhook"
     mgr.control_psu_output = True
@@ -73,7 +74,8 @@ def test_round_trip_save_load(tmp_path):
 
     mgr2 = SettingsManager()
     mgr2.load()
-    assert mgr2.psu_visa_string == "USB0::0x1234::INSTR"
+    assert mgr2.psu_visa_strings == ["USB0::0x1234::INSTR", "GPIB0::5::INSTR"]
+    assert mgr2.load_visa_strings == ["USB0::0xABCD::INSTR"]
     assert mgr2.poll_rate_hz == 5.0
     assert mgr2.teams_webhook_url == "https://example.com/webhook"
     assert mgr2.control_psu_output is True
@@ -95,7 +97,49 @@ def test_corrupt_config_falls_back_to_defaults(tmp_path):
     mgr.load()
 
     assert mgr.poll_rate_hz == 1.0
-    assert mgr.psu_visa_string == ""
+    assert mgr.psu_visa_strings == [""]
+
+
+def test_migration_from_old_single_visa_fields(tmp_path):
+    """Old config.json with single-string visa fields is migrated to lists."""
+    import src.config.settings_manager as sm_module
+    sm_module.CONFIG_FILE = tmp_path / "config.json"
+    sm_module.LOGS_DIR = tmp_path / "logs"
+
+    # Write a v1-style config with singular field names
+    old_config = {
+        "psu_visa_string": "USB0::0x0957::INSTR",
+        "load_visa_string": "USB0::0x2A45::INSTR",
+        "poll_rate_hz": 2.0,
+    }
+    (tmp_path / "config.json").write_text(json.dumps(old_config), encoding="utf-8")
+
+    from src.config.settings_manager import SettingsManager
+    mgr = SettingsManager()
+    mgr.load()
+
+    assert mgr.psu_visa_strings == ["USB0::0x0957::INSTR"]
+    assert mgr.load_visa_strings == ["USB0::0x2A45::INSTR"]
+    assert mgr.poll_rate_hz == 2.0
+
+
+def test_psu_only_mode_saves_empty_load_list(tmp_path):
+    """An empty load_visa_strings list round-trips correctly (PSU-only mode)."""
+    import src.config.settings_manager as sm_module
+    sm_module.CONFIG_FILE = tmp_path / "config.json"
+    sm_module.LOGS_DIR = tmp_path / "logs"
+
+    from src.config.settings_manager import SettingsManager
+    mgr = SettingsManager()
+    mgr.load()
+    mgr.psu_visa_strings = ["USB0::0x0957::INSTR"]
+    mgr.load_visa_strings = []  # PSU-only
+    mgr.save()
+
+    mgr2 = SettingsManager()
+    mgr2.load()
+    assert mgr2.psu_visa_strings == ["USB0::0x0957::INSTR"]
+    assert mgr2.load_visa_strings == []
 
 
 def test_unknown_keys_ignored(tmp_path):

@@ -37,8 +37,8 @@ LOGS_DIR: Path = APP_ROOT / "logs"
 # ---------------------------------------------------------------------------
 
 _DEFAULTS: dict[str, Any] = {
-    "psu_visa_string": "",
-    "load_visa_string": "",
+    "psu_visa_strings": [""],        # list of PSU VISA addresses (≥1)
+    "load_visa_strings": [""],       # list of Load VISA addresses (0 = PSU-only)
     "poll_rate_hz": 1.0,
     "teams_webhook_url": "",
     "log_directory": str(LOGS_DIR),
@@ -70,9 +70,9 @@ class SettingsManager:
     """
 
     def __init__(self) -> None:
-        # Instrument connection
-        self.psu_visa_string: str = _DEFAULTS["psu_visa_string"]
-        self.load_visa_string: str = _DEFAULTS["load_visa_string"]
+        # Instrument connection — lists support multiple instruments
+        self.psu_visa_strings: list[str] = _DEFAULTS["psu_visa_strings"][:]
+        self.load_visa_strings: list[str] = _DEFAULTS["load_visa_strings"][:]
 
         # Polling
         self.poll_rate_hz: float = _DEFAULTS["poll_rate_hz"]
@@ -117,8 +117,26 @@ class SettingsManager:
             self.save()
             return
 
-        self.psu_visa_string = raw.get("psu_visa_string", _DEFAULTS["psu_visa_string"])
-        self.load_visa_string = raw.get("load_visa_string", _DEFAULTS["load_visa_string"])
+        # -- PSU VISA strings (with migration from old single-value field) --
+        if "psu_visa_strings" in raw:
+            val = raw["psu_visa_strings"]
+            self.psu_visa_strings = val if isinstance(val, list) else [str(val)]
+        elif "psu_visa_string" in raw:
+            # Migrate old single-string field
+            self.psu_visa_strings = [raw["psu_visa_string"]]
+        else:
+            self.psu_visa_strings = _DEFAULTS["psu_visa_strings"][:]
+
+        # -- Load VISA strings (with migration) --
+        if "load_visa_strings" in raw:
+            val = raw["load_visa_strings"]
+            self.load_visa_strings = val if isinstance(val, list) else [str(val)]
+        elif "load_visa_string" in raw:
+            # Migrate old single-string field
+            self.load_visa_strings = [raw["load_visa_string"]]
+        else:
+            self.load_visa_strings = _DEFAULTS["load_visa_strings"][:]
+
         self.poll_rate_hz = float(raw.get("poll_rate_hz", _DEFAULTS["poll_rate_hz"]))
         self.teams_webhook_url = raw.get("teams_webhook_url", _DEFAULTS["teams_webhook_url"])
         self.log_directory = raw.get("log_directory", _DEFAULTS["log_directory"])
@@ -140,8 +158,8 @@ class SettingsManager:
     def save(self) -> None:
         """Atomically write current settings to config.json."""
         data = {
-            "psu_visa_string": self.psu_visa_string,
-            "load_visa_string": self.load_visa_string,
+            "psu_visa_strings": self.psu_visa_strings,
+            "load_visa_strings": self.load_visa_strings,
             "poll_rate_hz": self.poll_rate_hz,
             "teams_webhook_url": self.teams_webhook_url,
             "log_directory": self.log_directory,
@@ -172,8 +190,8 @@ class SettingsManager:
 
     def _apply_defaults(self) -> None:
         """Reset all fields to their default values."""
-        self.psu_visa_string = _DEFAULTS["psu_visa_string"]
-        self.load_visa_string = _DEFAULTS["load_visa_string"]
+        self.psu_visa_strings = _DEFAULTS["psu_visa_strings"][:]
+        self.load_visa_strings = _DEFAULTS["load_visa_strings"][:]
         self.poll_rate_hz = _DEFAULTS["poll_rate_hz"]
         self.teams_webhook_url = _DEFAULTS["teams_webhook_url"]
         self.log_directory = _DEFAULTS["log_directory"]

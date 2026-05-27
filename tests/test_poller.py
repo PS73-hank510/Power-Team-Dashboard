@@ -1,4 +1,8 @@
-"""Tests for PollWorker — signal emission and clean stop."""
+"""Tests for PollWorker — signal emission and clean stop.
+
+PollWorker now accepts lists of instruments (psus, loads) to support
+multiple instruments per type.
+"""
 
 from __future__ import annotations
 
@@ -32,12 +36,11 @@ def test_poller_emits_telemetry_samples(qtbot, mock_psu, mock_load):
     """PollWorker emits telemetry_sample signals on each poll cycle."""
     from src.core.poller import PollWorker
 
-    worker = PollWorker(psu=mock_psu, load=mock_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[mock_psu], loads=[mock_load], poll_rate_hz=10.0)
     received = []
     worker.telemetry_sample.connect(lambda s: received.append(s))
 
     worker.start()
-    # At 10 Hz, 3 poll cycles = ~0.3s; wait up to 2s
     qtbot.waitUntil(lambda: len(received) >= 5, timeout=2000)
     worker.stop_polling()
     worker.wait(2000)
@@ -52,7 +55,7 @@ def test_poller_emits_correct_parameters(qtbot, mock_psu, mock_load):
     """Samples have correct source/parameter/unit labels."""
     from src.core.poller import PollWorker
 
-    worker = PollWorker(psu=mock_psu, load=mock_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[mock_psu], loads=[mock_load], poll_rate_hz=10.0)
     received = []
     worker.telemetry_sample.connect(lambda s: received.append(s))
 
@@ -69,6 +72,68 @@ def test_poller_emits_correct_parameters(qtbot, mock_psu, mock_load):
     assert ("LOAD", "current") in params
 
 
+def test_poller_source_index_is_zero_for_single_instrument(qtbot, mock_psu, mock_load):
+    """source_index is 0 for the first (and only) instrument of each type."""
+    from src.core.poller import PollWorker
+
+    worker = PollWorker(psus=[mock_psu], loads=[mock_load], poll_rate_hz=10.0)
+    received = []
+    worker.telemetry_sample.connect(lambda s: received.append(s))
+
+    worker.start()
+    qtbot.waitUntil(lambda: len(received) >= 5, timeout=2000)
+    worker.stop_polling()
+    worker.wait(2000)
+
+    assert all(s.source_index == 0 for s in received)
+
+
+def test_poller_source_index_for_multiple_psus(qtbot, mock_load):
+    """source_index reflects the position in the psus list."""
+    from src.core.poller import PollWorker
+
+    psu0 = MagicMock()
+    psu0.measure_voltage.return_value = 12.0
+    psu0.measure_current.return_value = 1.0
+    psu0.measure_power.return_value = 12.0
+
+    psu1 = MagicMock()
+    psu1.measure_voltage.return_value = 24.0
+    psu1.measure_current.return_value = 2.0
+    psu1.measure_power.return_value = 48.0
+
+    worker = PollWorker(psus=[psu0, psu1], loads=[], poll_rate_hz=10.0)
+    received = []
+    worker.telemetry_sample.connect(lambda s: received.append(s))
+
+    worker.start()
+    qtbot.waitUntil(lambda: len(received) >= 6, timeout=2000)
+    worker.stop_polling()
+    worker.wait(2000)
+
+    psu_samples = [s for s in received if s.source == "PSU"]
+    indices = {s.source_index for s in psu_samples}
+    assert 0 in indices
+    assert 1 in indices
+
+
+def test_poller_psu_only_no_load_samples(qtbot, mock_psu):
+    """In PSU-only mode (empty loads list), no LOAD samples are emitted."""
+    from src.core.poller import PollWorker
+
+    worker = PollWorker(psus=[mock_psu], loads=[], poll_rate_hz=10.0)
+    received = []
+    worker.telemetry_sample.connect(lambda s: received.append(s))
+
+    worker.start()
+    qtbot.waitUntil(lambda: len(received) >= 3, timeout=2000)
+    worker.stop_polling()
+    worker.wait(2000)
+
+    assert all(s.source == "PSU" for s in received)
+    assert len(received) >= 3
+
+
 def test_poller_emits_communication_error_on_psu_failure(qtbot, mock_load):
     """Communication errors from PSU emit communication_error signal."""
     from src.core.poller import PollWorker
@@ -78,7 +143,7 @@ def test_poller_emits_communication_error_on_psu_failure(qtbot, mock_load):
     failing_psu.measure_current.side_effect = CommunicationError("timeout")
     failing_psu.measure_power.side_effect = CommunicationError("timeout")
 
-    worker = PollWorker(psu=failing_psu, load=mock_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[failing_psu], loads=[mock_load], poll_rate_hz=10.0)
     errors = []
     worker.communication_error.connect(lambda msg: errors.append(msg))
 
@@ -99,7 +164,7 @@ def test_poller_emits_communication_error_on_load_failure(qtbot, mock_psu):
     failing_load.measure_voltage.side_effect = CommunicationError("timeout")
     failing_load.measure_current.side_effect = CommunicationError("timeout")
 
-    worker = PollWorker(psu=mock_psu, load=failing_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[mock_psu], loads=[failing_load], poll_rate_hz=10.0)
     errors = []
     worker.communication_error.connect(lambda msg: errors.append(msg))
 
@@ -117,20 +182,18 @@ def test_poller_stops_cleanly(qtbot, mock_psu, mock_load):
     import threading
     from PyQt6.QtWidgets import QApplication
 
-    worker = PollWorker(psu=mock_psu, load=mock_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[mock_psu], loads=[mock_load], poll_rate_hz=10.0)
     received = []
     worker.telemetry_sample.connect(lambda s: received.append(s))
 
     worker.start()
     qtbot.waitUntil(lambda: len(received) >= 3, timeout=2000)
 
-    # Set up a threading event to detect when the Qt finished signal fires
     done = threading.Event()
     worker.finished.connect(lambda: done.set())
 
     worker.stop_polling()
 
-    # Pump the Qt event loop while waiting for the thread to finish
     deadline = time.time() + 3.0
     while not done.is_set() and time.time() < deadline:
         QApplication.processEvents()
@@ -143,7 +206,7 @@ def test_poller_emits_cycle_complete(qtbot, mock_psu, mock_load):
     """poll_cycle_complete is emitted after each full cycle."""
     from src.core.poller import PollWorker
 
-    worker = PollWorker(psu=mock_psu, load=mock_load, poll_rate_hz=10.0)
+    worker = PollWorker(psus=[mock_psu], loads=[mock_load], poll_rate_hz=10.0)
     cycles = []
     worker.poll_cycle_complete.connect(lambda: cycles.append(1))
 
