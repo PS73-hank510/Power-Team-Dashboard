@@ -6,8 +6,12 @@ An optional "No load" checkbox enables PSU-only testing.
 
 from __future__ import annotations
 
+import logging
+
 import pyvisa
 from PyQt6.QtCore import pyqtSignal
+
+logger = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -315,7 +319,8 @@ class ConnectionPanel(QGroupBox):
             else:
                 self._scan_combo.addItem("(no instruments found)")
         except Exception as exc:
-            self._scan_combo.addItem(f"(scan error: {exc})")
+            logger.debug("VISA scan failed: %s", exc)
+            self._scan_combo.addItem("(scan failed — check connections)")
 
     def _on_scan_selection(self, text: str) -> None:
         """When the user picks a scanned resource, paste it into the focused field."""

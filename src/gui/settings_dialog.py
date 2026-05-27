@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QComboBox,
     QVBoxLayout,
@@ -118,10 +119,21 @@ class SettingsDialog(QDialog):
             self._log_dir_field.setText(path)
 
     def _on_ok(self) -> None:
+        url = self._webhook_field.text().strip()
+        if url and not url.lower().startswith("https://"):
+            QMessageBox.warning(
+                self,
+                "Invalid Webhook URL",
+                "The Teams webhook URL must start with https://\n\n"
+                "Microsoft Power Automate webhooks always use HTTPS. "
+                "Please check the URL and try again.",
+            )
+            return
+
         self._settings.poll_rate_hz = self._poll_combo.currentData()
         self._settings.control_psu_output = self._psu_output_cb.isChecked()
         self._settings.control_load_input = self._load_input_cb.isChecked()
         self._settings.log_directory = self._log_dir_field.text()
-        self._settings.teams_webhook_url = self._webhook_field.text().strip()
+        self._settings.teams_webhook_url = url
         self._settings.save()
         self.accept()

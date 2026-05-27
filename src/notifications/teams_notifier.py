@@ -62,6 +62,21 @@ class TeamsNotifier:
         if not self._webhook_url:
             return False
 
+        # Refuse to transmit the webhook bearer token over plain HTTP
+        if not self._webhook_url.lower().startswith("https://"):
+            logger.warning(
+                "Teams webhook URL does not start with https:// — refusing to send. "
+                "Update the URL in Settings."
+            )
+            return False
+
+        # Secondary rate-limit guard (primary enforcement is in LimitChecker)
+        now = time.time()
+        last = self._last_sent.get(message, 0.0)
+        if now - last < _RATE_LIMIT_SECONDS:
+            return False
+        self._last_sent[message] = now
+
         payload = self._build_payload(message, color)
         try:
             response = httpx.post(

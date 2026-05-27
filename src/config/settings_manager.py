@@ -10,6 +10,8 @@ Never hardcode any path outside this module.
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -170,12 +172,21 @@ class SettingsManager:
         }
 
         # Atomic write: write to temp file, then rename
+        tmp = CONFIG_FILE.with_suffix(".tmp")
         try:
-            tmp = CONFIG_FILE.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
             tmp.replace(CONFIG_FILE)
+            # Restrict config.json to the current user — it contains the Teams
+            # webhook bearer token.  On Windows os.chmod only controls the
+            # read-only attribute; for stronger protection use icacls manually.
+            os.chmod(CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
-            pass  # Non-fatal — settings simply won't persist this round
+            # Clean up temp file so the credential isn't left on disk unmanaged
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            # Non-fatal — settings simply won't persist this round
 
     def get_log_dir(self) -> Path:
         """Return the configured log directory as a Path, creating it if needed."""

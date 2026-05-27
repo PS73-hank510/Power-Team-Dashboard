@@ -10,9 +10,12 @@ any number of power supplies and an optional electronic load.
 
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from PyQt6.QtCore import Qt
+
+logger = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -267,11 +270,13 @@ class MainWindow(QMainWindow):
                 psu.connect()
                 psus.append(psu)
             except CommunicationError as exc:
+                logger.error("PSU connection failed for %s: %s", visa, exc)
                 for p in psus:
                     p.disconnect()
                 QMessageBox.critical(
                     self, "PSU Connection Failed",
-                    f"Could not connect to PSU at {visa}:\n{exc}"
+                    f"Could not connect to PSU at:\n{visa}\n\n"
+                    "Check that the instrument is powered on and the VISA address is correct.",
                 )
                 return
 
@@ -283,13 +288,15 @@ class MainWindow(QMainWindow):
                 load.connect()
                 loads.append(load)
             except CommunicationError as exc:
+                logger.error("Load connection failed for %s: %s", visa, exc)
                 for p in psus:
                     p.disconnect()
                 for ld in loads:
                     ld.disconnect()
                 QMessageBox.critical(
                     self, "Load Connection Failed",
-                    f"Could not connect to Load at {visa}:\n{exc}"
+                    f"Could not connect to Load at:\n{visa}\n\n"
+                    "Check that the instrument is powered on and the VISA address is correct.",
                 )
                 return
 
