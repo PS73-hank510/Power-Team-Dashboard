@@ -1,0 +1,199 @@
+"""Tests for LimitChecker — breach detection, resolution, and rate limiting."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import patch
+
+import pytest
+
+from src.core.limit_checker import LimitChecker, ALERT_RATE_LIMIT_SECONDS
+from src.core.models import LimitPair, TelemetrySample
+
+
+def _sample(source="PSU", parameter="voltage", value=12.0, unit="V"):
+    return TelemetrySample(timestamp=time.time(), source=source,
+                           parameter=parameter, value=value, unit=unit)
+
+
+# ------------------------------------------------------------------
+# Upper limit tests
+# ------------------------------------------------------------------
+
+def test_upper_breach_detected():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(value=15.32))
+    assert len(alerts) == 1
+    assert "UPPER LIMIT BREACH" in alerts[0]
+    assert "15.32" in alerts[0] or "15.3" in alerts[0]
+    assert "15" in alerts[0]
+
+
+def test_upper_breach_message_contains_direction():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(value=16.0))
+    assert ">" in alerts[0]
+
+
+def test_upper_breach_no_alert_when_at_limit():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(value=15.0))
+    assert alerts == []
+
+
+def test_upper_no_breach_below_limit():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(value=14.99))
+    assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Lower limit tests
+# ------------------------------------------------------------------
+
+def test_lower_breach_detected():
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=9.0)})
+    alerts = checker.check(_sample(value=8.5))
+    assert len(alerts) == 1
+    assert "LOWER LIMIT BREACH" in alerts[0]
+    assert "<" in alerts[0]
+
+
+def test_lower_no_breach_above_limit():
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=9.0)})
+    alerts = checker.check(_sample(value=9.01))
+    assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Sustained breach — no duplicate alert
+# ------------------------------------------------------------------
+
+def test_no_duplicate_upper_alert_on_sustained_breach():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    checker.check(_sample(value=16.0))  # first breach
+    alerts = checker.check(_sample(value=16.5))  # still breached
+    assert alerts == []
+
+
+def test_no_duplicate_lower_alert_on_sustained_breach():
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=9.0)})
+    checker.check(_sample(value=8.0))
+    alerts = checker.check(_sample(value=7.5))
+    assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Resolution
+# ------------------------------------------------------------------
+
+def test_resolution_alert_on_return_to_range():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    checker.check(_sample(value=16.0))  # breach
+    alerts = checker.check(_sample(value=14.0))  # resolved
+    assert len(alerts) == 1
+    assert "RESOLVED" in alerts[0]
+    assert "upper" in alerts[0].lower()
+
+
+def test_no_resolution_alert_if_never_breached():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(value=14.0))
+    assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Both upper and lower simultaneously
+# ------------------------------------------------------------------
+
+def test_both_sides_can_breach_simultaneously():
+    """A pathological signal that is simultaneously above max and below min is impossible,
+    but two separate parameters can each be in breach."""
+    checker = LimitChecker({
+        "PSU_voltage": LimitPair(min=9.0, max=15.0),
+        "PSU_current": LimitPair(max=5.0),
+    })
+    alerts_v = checker.check(_sample(parameter="voltage", value=16.0))
+    alerts_i = checker.check(_sample(parameter="current", value=6.0, unit="A"))
+    assert len(alerts_v) == 1
+    assert len(alerts_i) == 1
+
+
+def test_upper_and_lower_both_on_same_param():
+    """Both limits configured — only the relevant side fires."""
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=9.0, max=15.0)})
+    # Only upper breach
+    alerts = checker.check(_sample(value=16.0))
+    assert len(alerts) == 1
+    assert "UPPER" in alerts[0]
+    assert "LOWER" not in alerts[0]
+
+
+# ------------------------------------------------------------------
+# None limits disabled
+# ------------------------------------------------------------------
+
+def test_none_max_means_no_upper_check():
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=9.0, max=None)})
+    alerts = checker.check(_sample(value=999.0))  # huge value, no upper limit
+    assert alerts == []
+
+
+def test_none_min_means_no_lower_check():
+    checker = LimitChecker({"PSU_voltage": LimitPair(min=None, max=15.0)})
+    alerts = checker.check(_sample(value=-999.0))  # huge negative, no lower limit
+    assert alerts == []
+
+
+def test_unknown_parameter_ignored():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    alerts = checker.check(_sample(parameter="power", value=9999.0, unit="W"))
+    assert alerts == []
+
+
+# ------------------------------------------------------------------
+# Rate limiting
+# ------------------------------------------------------------------
+
+def test_rate_limit_suppresses_second_alert_within_window():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    # Breach, then resolve, then breach again within 60s
+    checker.check(_sample(value=16.0))   # breach → alert
+    checker.check(_sample(value=14.0))   # resolve → resolved alert
+    alerts = checker.check(_sample(value=16.0))  # second breach within window
+    # Rate limit should suppress (last alert was just now)
+    assert alerts == []
+
+
+def test_rate_limit_allows_alert_after_window():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    checker.check(_sample(value=16.0))
+    checker.check(_sample(value=14.0))
+
+    # Fast-forward past the rate limit window
+    with patch("src.core.limit_checker.time") as mock_time:
+        mock_time.time.return_value = time.time() + ALERT_RATE_LIMIT_SECONDS + 1
+        alerts = checker.check(_sample(value=16.0))
+    assert len(alerts) == 1
+
+
+# ------------------------------------------------------------------
+# update_limits and reset
+# ------------------------------------------------------------------
+
+def test_update_limits_resets_state():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    checker.check(_sample(value=16.0))  # breach
+    checker.update_limits({"PSU_voltage": LimitPair(max=20.0)})
+    # Old breach state cleared — value 16 is now within new limit
+    alerts = checker.check(_sample(value=16.0))
+    assert alerts == []
+
+
+def test_reset_clears_breach_state():
+    checker = LimitChecker({"PSU_voltage": LimitPair(max=15.0)})
+    checker.check(_sample(value=16.0))  # breach active
+    checker.reset()
+    # After reset, going back to 14 should NOT produce a "resolved" alert
+    alerts = checker.check(_sample(value=14.0))
+    assert alerts == []

@@ -1,0 +1,193 @@
+"""Application settings — persistence and APP_ROOT detection.
+
+APP_ROOT is the single location from which all runtime paths are derived.
+It resolves correctly whether the app runs as a Python script (development)
+or as a PyInstaller-frozen .exe (deployment).
+
+Never hardcode any path outside this module.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Optional
+
+from src.core.models import LimitPair
+
+# ---------------------------------------------------------------------------
+# APP_ROOT detection — the foundation of all portability
+# ---------------------------------------------------------------------------
+
+if getattr(sys, "frozen", False):
+    # Running as a PyInstaller .exe — keep data beside the executable
+    APP_ROOT: Path = Path(sys.executable).parent
+else:
+    # Running as a Python script — project root is 2 levels above this file
+    # (src/config/settings_manager.py  →  src/config  →  src  →  project root)
+    APP_ROOT = Path(__file__).resolve().parents[2]
+
+CONFIG_FILE: Path = APP_ROOT / "config.json"
+LOGS_DIR: Path = APP_ROOT / "logs"
+
+# ---------------------------------------------------------------------------
+# Default values
+# ---------------------------------------------------------------------------
+
+_DEFAULTS: dict[str, Any] = {
+    "psu_visa_string": "",
+    "load_visa_string": "",
+    "poll_rate_hz": 1.0,
+    "teams_webhook_url": "",
+    "log_directory": str(LOGS_DIR),
+    "control_psu_output": False,
+    "control_load_input": False,
+    "last_load_mode": "CC",
+    "graph_window_seconds": 60,
+    "limits": {},  # key: "PSU_voltage" → {"min": null, "max": null}
+}
+
+# Valid poll rate options (Hz)
+POLL_RATE_OPTIONS: list[float] = [0.5, 1.0, 2.0, 5.0, 10.0]
+
+# Graph window options (seconds; 0 means "All")
+GRAPH_WINDOW_OPTIONS: list[int] = [10, 30, 60, 120, 0]
+
+
+class SettingsManager:
+    """Loads and saves application settings to config.json.
+
+    All settings are stored as typed attributes. Call load() on startup
+    and save() whenever a value changes.
+
+    Usage:
+        settings = SettingsManager()
+        settings.load()
+        settings.teams_webhook_url = "https://..."
+        settings.save()
+    """
+
+    def __init__(self) -> None:
+        # Instrument connection
+        self.psu_visa_string: str = _DEFAULTS["psu_visa_string"]
+        self.load_visa_string: str = _DEFAULTS["load_visa_string"]
+
+        # Polling
+        self.poll_rate_hz: float = _DEFAULTS["poll_rate_hz"]
+
+        # Notifications
+        self.teams_webhook_url: str = _DEFAULTS["teams_webhook_url"]
+
+        # Logging
+        self.log_directory: str = _DEFAULTS["log_directory"]
+
+        # Instrument control flags
+        self.control_psu_output: bool = _DEFAULTS["control_psu_output"]
+        self.control_load_input: bool = _DEFAULTS["control_load_input"]
+
+        # Load configuration
+        self.last_load_mode: str = _DEFAULTS["last_load_mode"]
+
+        # Graph display
+        self.graph_window_seconds: int = _DEFAULTS["graph_window_seconds"]
+
+        # Limits: maps parameter key (e.g. "PSU_voltage") to LimitPair
+        self.limits: dict[str, LimitPair] = {}
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def load(self) -> None:
+        """Load settings from config.json. Creates the file with defaults if absent."""
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not CONFIG_FILE.exists():
+            self._apply_defaults()
+            self.save()
+            return
+
+        try:
+            raw: dict = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            # Corrupt or unreadable config — fall back to defaults
+            self._apply_defaults()
+            self.save()
+            return
+
+        self.psu_visa_string = raw.get("psu_visa_string", _DEFAULTS["psu_visa_string"])
+        self.load_visa_string = raw.get("load_visa_string", _DEFAULTS["load_visa_string"])
+        self.poll_rate_hz = float(raw.get("poll_rate_hz", _DEFAULTS["poll_rate_hz"]))
+        self.teams_webhook_url = raw.get("teams_webhook_url", _DEFAULTS["teams_webhook_url"])
+        self.log_directory = raw.get("log_directory", _DEFAULTS["log_directory"])
+        self.control_psu_output = bool(raw.get("control_psu_output", _DEFAULTS["control_psu_output"]))
+        self.control_load_input = bool(raw.get("control_load_input", _DEFAULTS["control_load_input"]))
+        self.last_load_mode = raw.get("last_load_mode", _DEFAULTS["last_load_mode"])
+        self.graph_window_seconds = int(raw.get("graph_window_seconds", _DEFAULTS["graph_window_seconds"]))
+
+        raw_limits: dict = raw.get("limits", {})
+        self.limits = {
+            key: LimitPair.from_dict(val)
+            for key, val in raw_limits.items()
+            if isinstance(val, dict)
+        }
+
+        # Ensure log directory exists (user may have changed it)
+        self._ensure_log_dir()
+
+    def save(self) -> None:
+        """Atomically write current settings to config.json."""
+        data = {
+            "psu_visa_string": self.psu_visa_string,
+            "load_visa_string": self.load_visa_string,
+            "poll_rate_hz": self.poll_rate_hz,
+            "teams_webhook_url": self.teams_webhook_url,
+            "log_directory": self.log_directory,
+            "control_psu_output": self.control_psu_output,
+            "control_load_input": self.control_load_input,
+            "last_load_mode": self.last_load_mode,
+            "graph_window_seconds": self.graph_window_seconds,
+            "limits": {key: pair.to_dict() for key, pair in self.limits.items()},
+        }
+
+        # Atomic write: write to temp file, then rename
+        try:
+            tmp = CONFIG_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.replace(CONFIG_FILE)
+        except OSError:
+            pass  # Non-fatal — settings simply won't persist this round
+
+    def get_log_dir(self) -> Path:
+        """Return the configured log directory as a Path, creating it if needed."""
+        p = Path(self.log_directory)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _apply_defaults(self) -> None:
+        """Reset all fields to their default values."""
+        self.psu_visa_string = _DEFAULTS["psu_visa_string"]
+        self.load_visa_string = _DEFAULTS["load_visa_string"]
+        self.poll_rate_hz = _DEFAULTS["poll_rate_hz"]
+        self.teams_webhook_url = _DEFAULTS["teams_webhook_url"]
+        self.log_directory = _DEFAULTS["log_directory"]
+        self.control_psu_output = _DEFAULTS["control_psu_output"]
+        self.control_load_input = _DEFAULTS["control_load_input"]
+        self.last_load_mode = _DEFAULTS["last_load_mode"]
+        self.graph_window_seconds = _DEFAULTS["graph_window_seconds"]
+        self.limits = {}
+
+    def _ensure_log_dir(self) -> None:
+        """Create the log directory if it doesn't exist."""
+        try:
+            Path(self.log_directory).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # Fall back to default if configured path is inaccessible
+            self.log_directory = str(LOGS_DIR)
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
