@@ -72,8 +72,7 @@ class CsvLogger:
                 "CsvLogger is not running. Call start() before write()."
             )
 
-        iso_ts = datetime.fromtimestamp(sample.timestamp).strftime(
-            "%Y-%m-%dT%H:%M:%S.") + f"{int(sample.timestamp * 1000) % 1000:03d}"
+        iso_ts = datetime.fromtimestamp(sample.timestamp).isoformat(timespec="milliseconds")
 
         self._writer.writerow(
             {

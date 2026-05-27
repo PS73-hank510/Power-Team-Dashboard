@@ -147,23 +147,9 @@ class _PlotGroup(QGroupBox):
                 continue
             param = key_str[len(prefix):]  # e.g. "PSU_voltage" → "voltage"
             if pair.max is not None:
-                line = pg.InfiniteLine(
-                    pos=pair.max, angle=0,
-                    pen=pg.mkPen("#FF5252", width=1, style=Qt.PenStyle.DashLine),
-                    label=f"{param} max={pair.max:.3g}",
-                    labelOpts={"color": "#FF5252"},
-                )
-                self._plot_widget.addItem(line)
-                self._limit_lines[f"{param}_max"] = line
+                self._add_limit_line(param, "max", pair.max, "#FF5252")
             if pair.min is not None:
-                line = pg.InfiniteLine(
-                    pos=pair.min, angle=0,
-                    pen=pg.mkPen("#FFC107", width=1, style=Qt.PenStyle.DashLine),
-                    label=f"{param} min={pair.min:.3g}",
-                    labelOpts={"color": "#FFC107"},
-                )
-                self._plot_widget.addItem(line)
-                self._limit_lines[f"{param}_min"] = line
+                self._add_limit_line(param, "min", pair.min, "#FFC107")
 
     def save_image(self, path: str) -> None:
         """Export the plot as a PNG."""
@@ -194,6 +180,17 @@ class _PlotGroup(QGroupBox):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _add_limit_line(self, param: str, side: str, value: float, color: str) -> None:
+        """Add a dashed horizontal limit line to the plot."""
+        line = pg.InfiniteLine(
+            pos=value, angle=0,
+            pen=pg.mkPen(color, width=1, style=Qt.PenStyle.DashLine),
+            label=f"{param} {side}={value:.3g}",
+            labelOpts={"color": color},
+        )
+        self._plot_widget.addItem(line)
+        self._limit_lines[f"{param}_{side}"] = line
 
     def _create_curve(self, source_index: int, parameter: str) -> None:
         """Dynamically add a new plot curve for an instrument/parameter combo."""

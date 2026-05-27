@@ -82,10 +82,14 @@ class BaseInstrument(ABC):
     # Protected SCPI helpers
     # ------------------------------------------------------------------
 
-    def _query(self, command: str) -> str:
-        """Send a query and return the stripped response string."""
+    def _ensure_connected(self) -> None:
+        """Raise CommunicationError if no VISA resource is open."""
         if self._resource is None:
             raise CommunicationError("Not connected. Call connect() first.")
+
+    def _query(self, command: str) -> str:
+        """Send a query and return the stripped response string."""
+        self._ensure_connected()
         try:
             response = self._resource.query(command)
             return response.strip()
@@ -106,8 +110,7 @@ class BaseInstrument(ABC):
 
     def _write(self, command: str) -> None:
         """Send a command with no response expected."""
-        if self._resource is None:
-            raise CommunicationError("Not connected. Call connect() first.")
+        self._ensure_connected()
         try:
             self._resource.write(command)
         except pyvisa.Error as exc:

@@ -102,32 +102,25 @@ class PollWorker(QThread):
     # Private polling methods
     # ------------------------------------------------------------------
 
+    def _emit_sample(
+        self, source: str, idx: int, parameter: str, value: float, unit: str, now: float
+    ) -> None:
+        """Construct and emit a single TelemetrySample."""
+        self.telemetry_sample.emit(
+            TelemetrySample(
+                timestamp=now, source=source, parameter=parameter,
+                value=value, unit=unit, source_index=idx,
+            )
+        )
+
     def _poll_psus(self) -> None:
         """Poll all PSU instruments and emit telemetry samples."""
         for idx, psu in enumerate(self._psus):
             now = time.time()
             try:
-                v = psu.measure_voltage()
-                self.telemetry_sample.emit(
-                    TelemetrySample(timestamp=now, source="PSU",
-                                    parameter="voltage", value=v, unit="V",
-                                    source_index=idx)
-                )
-
-                i = psu.measure_current()
-                self.telemetry_sample.emit(
-                    TelemetrySample(timestamp=now, source="PSU",
-                                    parameter="current", value=i, unit="A",
-                                    source_index=idx)
-                )
-
-                p = psu.measure_power()
-                self.telemetry_sample.emit(
-                    TelemetrySample(timestamp=now, source="PSU",
-                                    parameter="power", value=p, unit="W",
-                                    source_index=idx)
-                )
-
+                self._emit_sample("PSU", idx, "voltage", psu.measure_voltage(), "V", now)
+                self._emit_sample("PSU", idx, "current", psu.measure_current(), "A", now)
+                self._emit_sample("PSU", idx, "power",   psu.measure_power(),   "W", now)
             except CommunicationError as exc:
                 self.communication_error.emit(f"PSU-{idx} communication error: {exc}")
 
@@ -139,19 +132,7 @@ class PollWorker(QThread):
         for idx, load in enumerate(self._loads):
             now = time.time()
             try:
-                v = load.measure_voltage()
-                self.telemetry_sample.emit(
-                    TelemetrySample(timestamp=now, source="LOAD",
-                                    parameter="voltage", value=v, unit="V",
-                                    source_index=idx)
-                )
-
-                i = load.measure_current()
-                self.telemetry_sample.emit(
-                    TelemetrySample(timestamp=now, source="LOAD",
-                                    parameter="current", value=i, unit="A",
-                                    source_index=idx)
-                )
-
+                self._emit_sample("LOAD", idx, "voltage", load.measure_voltage(), "V", now)
+                self._emit_sample("LOAD", idx, "current", load.measure_current(), "A", now)
             except CommunicationError as exc:
                 self.communication_error.emit(f"Load-{idx} communication error: {exc}")

@@ -186,60 +186,67 @@ class ConnectionPanel(QGroupBox):
 
     def _add_psu_row(self, visa_str: str = "") -> None:
         """Append a PSU VISA string row."""
-        idx = len(self._psu_rows)
-        row_widget, label, field, remove_btn = self._make_row(
-            f"PSU {idx + 1}:",
+        self._add_row(
+            self._psu_rows, self._psu_layout, "PSU",
             "e.g. USB0::0x0957::0x2C07::MY12345::INSTR",
-            visa_str,
-        )
-        self._psu_rows.append((row_widget, label, field))
-        self._psu_layout.addWidget(row_widget)
-        remove_btn.clicked.connect(
-            lambda _checked=False, rw=row_widget, f=field: self._remove_psu_row(rw, f)
+            visa_str, self._remove_psu_row,
         )
 
     def _remove_psu_row(self, row_widget: QWidget, field: QLineEdit) -> None:
         """Remove a PSU row. At least one PSU row is always kept."""
-        if len(self._psu_rows) <= 1:
-            return
-        idx = next(
-            (i for i, (rw, _, _) in enumerate(self._psu_rows) if rw is row_widget), -1
-        )
-        if idx < 0:
-            return
-        self._psu_rows.pop(idx)
-        self._psu_layout.removeWidget(row_widget)
-        row_widget.hide()
-        row_widget.deleteLater()
-        self._relabel(self._psu_rows, "PSU")
-        self._save_to_settings()
+        self._remove_row(self._psu_rows, self._psu_layout, "PSU", row_widget, min_rows=1)
 
     def _add_load_row(self, visa_str: str = "") -> None:
         """Append a Load VISA string row."""
-        idx = len(self._load_rows)
-        row_widget, label, field, remove_btn = self._make_row(
-            f"Load {idx + 1}:",
+        self._add_row(
+            self._load_rows, self._load_layout, "Load",
             "e.g. USB0::0x2A45::0x0040::SN67890::INSTR",
-            visa_str,
-        )
-        self._load_rows.append((row_widget, label, field))
-        self._load_layout.addWidget(row_widget)
-        remove_btn.clicked.connect(
-            lambda _checked=False, rw=row_widget, f=field: self._remove_load_row(rw, f)
+            visa_str, self._remove_load_row,
         )
 
     def _remove_load_row(self, row_widget: QWidget, field: QLineEdit) -> None:
         """Remove a Load row. Removing the last row is allowed (PSU-only)."""
-        idx = next(
-            (i for i, (rw, _, _) in enumerate(self._load_rows) if rw is row_widget), -1
+        self._remove_row(self._load_rows, self._load_layout, "Load", row_widget)
+
+    def _add_row(
+        self,
+        rows: list,
+        layout: "QVBoxLayout",
+        kind: str,
+        placeholder: str,
+        visa_str: str,
+        remover,
+    ) -> None:
+        """Shared helper: create a VISA input row, append it, and wire its remove button."""
+        idx = len(rows)
+        row_widget, label, field, remove_btn = self._make_row(
+            f"{kind} {idx + 1}:", placeholder, visa_str
         )
+        rows.append((row_widget, label, field))
+        layout.addWidget(row_widget)
+        remove_btn.clicked.connect(
+            lambda _checked=False, rw=row_widget, f=field: remover(rw, f)
+        )
+
+    def _remove_row(
+        self,
+        rows: list,
+        layout: "QVBoxLayout",
+        kind: str,
+        row_widget: QWidget,
+        min_rows: int = 0,
+    ) -> None:
+        """Shared helper: remove a VISA input row and renumber the remaining ones."""
+        if len(rows) <= min_rows:
+            return
+        idx = next((i for i, (rw, _, _) in enumerate(rows) if rw is row_widget), -1)
         if idx < 0:
             return
-        self._load_rows.pop(idx)
-        self._load_layout.removeWidget(row_widget)
+        rows.pop(idx)
+        layout.removeWidget(row_widget)
         row_widget.hide()
         row_widget.deleteLater()
-        self._relabel(self._load_rows, "Load")
+        self._relabel(rows, kind)
         self._save_to_settings()
 
     @staticmethod

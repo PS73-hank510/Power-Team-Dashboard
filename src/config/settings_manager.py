@@ -120,26 +120,14 @@ class SettingsManager:
             self.save()
             return
 
-        # -- PSU VISA strings (with migration from old single-value field) --
-        if "psu_visa_strings" in raw:
-            val = raw["psu_visa_strings"]
-            self.psu_visa_strings = val if isinstance(val, list) else [str(val)]
-        elif "psu_visa_string" in raw:
-            # Migrate old single-string field
-            self.psu_visa_strings = [raw["psu_visa_string"]]
-        else:
-            self.psu_visa_strings = _DEFAULTS["psu_visa_strings"][:]
-
-        # -- Load VISA strings (with migration) --
-        if "load_visa_strings" in raw:
-            val = raw["load_visa_strings"]
-            self.load_visa_strings = val if isinstance(val, list) else [str(val)]
-        elif "load_visa_string" in raw:
-            # Migrate old single-string field; empty string means no load was configured
-            val = raw["load_visa_string"]
-            self.load_visa_strings = [val] if val.strip() else []
-        else:
-            self.load_visa_strings = _DEFAULTS["load_visa_strings"][:]
+        # -- PSU and Load VISA strings (with migration from old single-value fields) --
+        self.psu_visa_strings = self._migrate_visa_strings(
+            raw, "psu_visa_strings", "psu_visa_string", _DEFAULTS["psu_visa_strings"]
+        )
+        self.load_visa_strings = self._migrate_visa_strings(
+            raw, "load_visa_strings", "load_visa_string", _DEFAULTS["load_visa_strings"],
+            strip_empty_singular=True,
+        )
 
         # -- No-load mode (added in v2) --
         self.no_load_mode = bool(raw.get("no_load_mode", False))
@@ -212,6 +200,33 @@ class SettingsManager:
         self.last_load_mode = _DEFAULTS["last_load_mode"]
         self.graph_window_seconds = _DEFAULTS["graph_window_seconds"]
         self.limits = {}
+
+    @staticmethod
+    def _migrate_visa_strings(
+        raw: dict,
+        plural_key: str,
+        singular_key: str,
+        default: list,
+        strip_empty_singular: bool = False,
+    ) -> list:
+        """Return a VISA string list from *raw*, migrating old single-string keys.
+
+        Args:
+            plural_key:           New-style list key (e.g. "psu_visa_strings").
+            singular_key:         Old-style single-string key (e.g. "psu_visa_string").
+            default:              Fallback list when neither key is present.
+            strip_empty_singular: If True, an empty/whitespace singular value yields []
+                                  rather than [''] (used for Load which supports no-load mode).
+        """
+        if plural_key in raw:
+            val = raw[plural_key]
+            return val if isinstance(val, list) else [str(val)]
+        if singular_key in raw:
+            val = raw[singular_key]
+            if strip_empty_singular and not val.strip():
+                return []
+            return [val]
+        return default[:]
 
     def _ensure_log_dir(self) -> None:
         """Create the log directory if it doesn't exist."""

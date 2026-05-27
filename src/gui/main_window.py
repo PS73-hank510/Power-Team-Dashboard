@@ -376,25 +376,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _update_psu_display(self, sample: TelemetrySample, idx: int) -> None:
-        if idx not in self._psu_caches:
-            self._psu_caches[idx] = {"voltage": 0.0, "current": 0.0, "power": 0.0}
-        self._psu_caches[idx][sample.parameter] = sample.value
-        cache = self._psu_caches[idx]
+        cache = self._psu_caches.setdefault(idx, {"voltage": 0.0, "current": 0.0, "power": 0.0})
+        cache[sample.parameter] = sample.value
         self._psu_panels[idx].update_readings(
-            cache.get("voltage", 0.0),
-            cache.get("current", 0.0),
-            cache.get("power", 0.0),
+            cache["voltage"], cache["current"], cache["power"]
         )
 
     def _update_load_display(self, sample: TelemetrySample, idx: int) -> None:
-        if idx not in self._load_caches:
-            self._load_caches[idx] = {"voltage": 0.0, "current": 0.0}
-        self._load_caches[idx][sample.parameter] = sample.value
-        cache = self._load_caches[idx]
-        self._load_panels[idx].update_readings(
-            cache.get("voltage", 0.0),
-            cache.get("current", 0.0),
-        )
+        cache = self._load_caches.setdefault(idx, {"voltage": 0.0, "current": 0.0})
+        cache[sample.parameter] = sample.value
+        self._load_panels[idx].update_readings(cache["voltage"], cache["current"])
 
     # ------------------------------------------------------------------
     # Menu actions

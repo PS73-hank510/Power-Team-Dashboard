@@ -96,10 +96,12 @@ class SettingsDialog(QDialog):
 
     def _load_values(self) -> None:
         # Poll rate
-        for i, hz in enumerate(POLL_RATE_OPTIONS):
-            if abs(hz - self._settings.poll_rate_hz) < 0.01:
-                self._poll_combo.setCurrentIndex(i)
-                break
+        idx = next(
+            (i for i, hz in enumerate(POLL_RATE_OPTIONS)
+             if abs(hz - self._settings.poll_rate_hz) < 0.01),
+            0,
+        )
+        self._poll_combo.setCurrentIndex(idx)
 
         self._psu_output_cb.setChecked(self._settings.control_psu_output)
         self._load_input_cb.setChecked(self._settings.control_load_input)
