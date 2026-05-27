@@ -24,9 +24,11 @@ class PsuPanel(QGroupBox):
 
     setpoint_changed = pyqtSignal(float, float)
 
-    def __init__(self, settings: SettingsManager, parent=None) -> None:
-        super().__init__("Power Supply", parent)
+    def __init__(self, settings: SettingsManager, index: int = 0, parent=None) -> None:
+        title = f"Power Supply {index + 1}" if index > 0 else "Power Supply"
+        super().__init__(title, parent)
         self._settings = settings
+        self._index = index
         self._build_ui()
 
     def apply_state(self, state: TestState) -> None:

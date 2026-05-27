@@ -1,4 +1,8 @@
-"""Tests for TestController — state machine transitions and telemetry dispatch."""
+"""Tests for TestController — state machine transitions and telemetry dispatch.
+
+connect_instruments() now takes lists: connect_instruments([psu], [load]).
+An empty loads list enables PSU-only mode.
+"""
 
 from __future__ import annotations
 
@@ -59,24 +63,36 @@ def test_initial_state_is_disconnected(controller):
 
 
 def test_connect_instruments_transitions_to_connected(controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     assert controller.state == TestState.CONNECTED
 
 
+def test_connect_psu_only_transitions_to_connected(controller, mock_psu):
+    """PSU-only mode (empty loads list) still reaches CONNECTED."""
+    controller.connect_instruments([mock_psu], [])
+    assert controller.state == TestState.CONNECTED
+
+
+def test_connect_raises_with_empty_psus(controller):
+    """At least one PSU must be provided."""
+    with pytest.raises(ValueError, match="power supply"):
+        controller.connect_instruments([], [])
+
+
 def test_connect_raises_if_not_disconnected(controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     with pytest.raises(ValueError, match="DISCONNECTED"):
-        controller.connect_instruments(mock_psu, mock_load)
+        controller.connect_instruments([mock_psu], [mock_load])
 
 
 def test_disconnect_transitions_to_disconnected(controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.disconnect_instruments()
     assert controller.state == TestState.DISCONNECTED
 
 
 def test_disconnect_raises_if_running(qtbot, controller, mock_psu, mock_load, tmp_path):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     with pytest.raises(ValueError):
         controller.disconnect_instruments()
@@ -84,7 +100,7 @@ def test_disconnect_raises_if_running(qtbot, controller, mock_psu, mock_load, tm
 
 
 def test_start_test_transitions_to_running(qtbot, controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     assert controller.state == TestState.RUNNING
     controller.stop_test()
@@ -96,7 +112,7 @@ def test_start_test_raises_if_not_connected(controller):
 
 
 def test_stop_test_transitions_to_stopped(qtbot, controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     controller.stop_test()
     assert controller.state == TestState.STOPPED
@@ -108,7 +124,7 @@ def test_stop_test_raises_if_not_running(controller):
 
 
 def test_reset_to_connected_from_stopped(qtbot, controller, mock_psu, mock_load):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     controller.stop_test()
     controller.reset_to_connected()
@@ -118,8 +134,34 @@ def test_reset_to_connected_from_stopped(qtbot, controller, mock_psu, mock_load)
 def test_state_changed_signal_emitted(qtbot, controller, mock_psu, mock_load):
     states = []
     controller.state_changed.connect(lambda s: states.append(s))
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     assert TestState.CONNECTED in states
+
+
+# ------------------------------------------------------------------
+# PSU-only mode
+# ------------------------------------------------------------------
+
+def test_psu_only_mode_start_stop(qtbot, controller, mock_psu):
+    """Start/stop a PSU-only test (no loads) without errors."""
+    controller.connect_instruments([mock_psu], [])
+    controller.start_test()
+    assert controller.state == TestState.RUNNING
+    controller.stop_test()
+    assert controller.state == TestState.STOPPED
+
+
+def test_psu_only_mode_telemetry(qtbot, controller, mock_psu):
+    """PSU-only mode emits PSU telemetry and no LOAD telemetry."""
+    received = []
+    controller.telemetry_ready.connect(lambda s: received.append(s))
+
+    controller.connect_instruments([mock_psu], [])
+    controller.start_test()
+    qtbot.waitUntil(lambda: len(received) >= 3, timeout=3000)
+    controller.stop_test()
+
+    assert all(s.source == "PSU" for s in received)
 
 
 # ------------------------------------------------------------------
@@ -127,12 +169,11 @@ def test_state_changed_signal_emitted(qtbot, controller, mock_psu, mock_load):
 # ------------------------------------------------------------------
 
 def test_start_test_creates_log_file(qtbot, controller, mock_psu, mock_load, tmp_path):
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     log_dir = Path(controller._settings.log_directory)
     log_dir.mkdir(parents=True, exist_ok=True)
     controller.stop_test()
-    # Log dir was created
     assert log_dir.exists()
 
 
@@ -145,12 +186,39 @@ def test_telemetry_ready_signal_re_emitted(qtbot, controller, mock_psu, mock_loa
     received = []
     controller.telemetry_ready.connect(lambda s: received.append(s))
 
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     qtbot.waitUntil(lambda: len(received) >= 5, timeout=3000)
     controller.stop_test()
 
     assert len(received) >= 5
+
+
+def test_multiple_psus_telemetry(qtbot, controller, mock_load):
+    """Telemetry from two PSUs arrives with distinct source_index values."""
+    psu0 = MagicMock()
+    psu0.measure_voltage.return_value = 12.0
+    psu0.measure_current.return_value = 1.0
+    psu0.measure_power.return_value = 12.0
+    psu0.disconnect.return_value = None
+
+    psu1 = MagicMock()
+    psu1.measure_voltage.return_value = 24.0
+    psu1.measure_current.return_value = 2.0
+    psu1.measure_power.return_value = 48.0
+    psu1.disconnect.return_value = None
+
+    received = []
+    controller.telemetry_ready.connect(lambda s: received.append(s))
+
+    controller.connect_instruments([psu0, psu1], [mock_load])
+    controller.start_test()
+    qtbot.waitUntil(lambda: len(received) >= 6, timeout=3000)
+    controller.stop_test()
+
+    psu_indices = {s.source_index for s in received if s.source == "PSU"}
+    assert 0 in psu_indices
+    assert 1 in psu_indices
 
 
 # ------------------------------------------------------------------
@@ -166,7 +234,7 @@ def test_limit_breach_calls_notifier(qtbot, controller, mock_psu, mock_load):
         side_effect=lambda msg: notifier_calls.append(msg)
     )
 
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     qtbot.waitUntil(lambda: len(notifier_calls) >= 1, timeout=3000)
     controller.stop_test()
@@ -185,10 +253,9 @@ def test_communication_error_calls_notifier(qtbot, controller, mock_psu, mock_lo
         side_effect=lambda msg: alert_calls.append(msg)
     )
 
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     qtbot.waitUntil(lambda: len(alert_calls) >= 1, timeout=3000)
-    # State must remain RUNNING — communication errors don't stop the test
     assert controller.state == TestState.RUNNING
     controller.stop_test()
 
@@ -204,7 +271,7 @@ def test_event_logged_signal_on_communication_error(qtbot, controller, mock_psu,
     events = []
     controller.event_logged.connect(lambda msg: events.append(msg))
 
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     qtbot.waitUntil(lambda: any("COMM ERROR" in e for e in events), timeout=3000)
     controller.stop_test()
@@ -216,7 +283,7 @@ def test_event_logged_signal_on_communication_error(qtbot, controller, mock_psu,
 
 def test_output_on_called_when_flag_set(qtbot, controller, mock_psu, mock_load):
     controller._settings.control_psu_output = True
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     mock_psu.output_on.assert_called_once()
     controller.stop_test()
@@ -225,8 +292,32 @@ def test_output_on_called_when_flag_set(qtbot, controller, mock_psu, mock_load):
 
 def test_output_not_called_when_flag_unset(qtbot, controller, mock_psu, mock_load):
     controller._settings.control_psu_output = False
-    controller.connect_instruments(mock_psu, mock_load)
+    controller.connect_instruments([mock_psu], [mock_load])
     controller.start_test()
     mock_psu.output_on.assert_not_called()
     controller.stop_test()
     mock_psu.output_off.assert_not_called()
+
+
+def test_multiple_psus_output_on_all_called(qtbot, controller, mock_load):
+    """When control_psu_output is True, output_on is called for every PSU."""
+    psu0 = MagicMock()
+    psu0.measure_voltage.return_value = 12.0
+    psu0.measure_current.return_value = 1.0
+    psu0.measure_power.return_value = 12.0
+    psu0.disconnect.return_value = None
+
+    psu1 = MagicMock()
+    psu1.measure_voltage.return_value = 24.0
+    psu1.measure_current.return_value = 2.0
+    psu1.measure_power.return_value = 48.0
+    psu1.disconnect.return_value = None
+
+    controller._settings.control_psu_output = True
+    controller.connect_instruments([psu0, psu1], [mock_load])
+    controller.start_test()
+    psu0.output_on.assert_called_once()
+    psu1.output_on.assert_called_once()
+    controller.stop_test()
+    psu0.output_off.assert_called_once()
+    psu1.output_off.assert_called_once()

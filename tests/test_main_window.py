@@ -39,7 +39,6 @@ def test_initial_state_is_disconnected(main_window):
 
 def test_close_allowed_when_disconnected(main_window, qtbot):
     """Window can be closed when not running."""
-    from PyQt6.QtGui import QCloseEvent
     event = MagicMock()
     event.isAccepted.return_value = False
     main_window.closeEvent(event)
@@ -54,7 +53,6 @@ def test_close_blocked_when_running(qtbot, mock_settings):
     window = MainWindow(mock_settings)
     qtbot.addWidget(window)
 
-    # Force state to RUNNING without actual instruments
     window._controller._state = TestState.RUNNING
 
     event = MagicMock()
@@ -82,32 +80,32 @@ def test_close_allowed_when_stopped(qtbot, mock_settings):
 def test_state_change_dispatched_to_control_bar(main_window):
     """State changes propagate to the control bar."""
     main_window._controller.state_changed.emit(TestState.CONNECTED)
-    # Control bar should show CONNECTED state — Start button enabled
     assert main_window._control_bar._button.isEnabled()
 
 
 def test_state_change_dispatched_to_connection_panel(main_window):
     """State changes propagate to the connection panel."""
     main_window._controller.state_changed.emit(TestState.DISCONNECTED)
-    # Connect button enabled in DISCONNECTED
     assert main_window._connection_panel._connect_button.isEnabled()
 
 
-def test_all_inputs_disabled_when_running(main_window):
+def test_all_inputs_disabled_when_running(qtbot, main_window):
     """When state is RUNNING, setpoint and mode inputs are disabled."""
+    main_window._create_instrument_panels(1, 1)
     main_window._apply_state(TestState.RUNNING)
-    assert not main_window._psu_panel._voltage_spin.isEnabled()
-    assert not main_window._psu_panel._current_spin.isEnabled()
-    assert not main_window._load_panel._mode_combo.isEnabled()
+    assert not main_window._psu_panels[0]._voltage_spin.isEnabled()
+    assert not main_window._psu_panels[0]._current_spin.isEnabled()
+    assert not main_window._load_panels[0]._mode_combo.isEnabled()
     assert not main_window._limits_panel._apply_button.isEnabled()
 
 
-def test_all_inputs_re_enabled_after_stop(main_window):
+def test_all_inputs_re_enabled_after_stop(qtbot, main_window):
     """After STOPPED state, inputs are re-enabled."""
+    main_window._create_instrument_panels(1, 1)
     main_window._apply_state(TestState.RUNNING)
     main_window._apply_state(TestState.STOPPED)
-    assert main_window._psu_panel._voltage_spin.isEnabled()
-    assert main_window._load_panel._mode_combo.isEnabled()
+    assert main_window._psu_panels[0]._voltage_spin.isEnabled()
+    assert main_window._load_panels[0]._mode_combo.isEnabled()
 
 
 def test_event_log_receives_messages(main_window):
@@ -118,10 +116,39 @@ def test_event_log_receives_messages(main_window):
 
 
 def test_connect_with_empty_visa_shows_warning(qtbot, main_window):
-    """Clicking Connect with empty VISA string shows a warning (no crash)."""
+    """Clicking Connect with empty PSU list shows a warning (no crash)."""
     with patch("PyQt6.QtWidgets.QMessageBox.warning") as mock_warn:
-        main_window._on_connect_requested("", "")
+        main_window._on_connect_requested([], [])
         mock_warn.assert_called_once()
+
+
+def test_connect_with_load_visas_but_no_psus_shows_warning(qtbot, main_window):
+    """Providing loads but no PSUs should still show a warning."""
+    with patch("PyQt6.QtWidgets.QMessageBox.warning") as mock_warn:
+        main_window._on_connect_requested([], ["USB0::0x1234::INSTR"])
+        mock_warn.assert_called_once()
+
+
+def test_multiple_psu_panels_created(qtbot, main_window):
+    """_create_instrument_panels creates the correct number of PSU panels."""
+    main_window._create_instrument_panels(3, 2)
+    assert len(main_window._psu_panels) == 3
+    assert len(main_window._load_panels) == 2
+
+
+def test_psu_only_mode_no_load_panels(qtbot, main_window):
+    """_create_instrument_panels with 0 loads creates no load panels."""
+    main_window._create_instrument_panels(2, 0)
+    assert len(main_window._psu_panels) == 2
+    assert len(main_window._load_panels) == 0
+
+
+def test_clear_instrument_panels_removes_all(qtbot, main_window):
+    """After clear, both panel lists are empty."""
+    main_window._create_instrument_panels(2, 1)
+    main_window._clear_instrument_panels()
+    assert main_window._psu_panels == []
+    assert main_window._load_panels == []
 
 
 def test_portability_no_hardcoded_paths():

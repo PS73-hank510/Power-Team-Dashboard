@@ -1,8 +1,12 @@
 """Live telemetry graph panel using pyqtgraph.
 
 Two groups of scrolling plots:
-  - PSU: voltage, current, power
-  - Load: voltage, current
+  - PSU group: voltage, current, power for each connected PSU
+  - Load group: voltage, current for each connected load
+
+Each instrument index gets its own colour variant.  Curves are added
+dynamically the first time a sample with a new (source_index, parameter)
+combination arrives — no pre-configuration required.
 
 Features:
   - Configurable time window (10/30/60/120/All seconds)
@@ -34,16 +38,19 @@ from PyQt6.QtWidgets import (
 
 from src.core.models import LimitPair, TelemetrySample
 
-# Colour palette for curves
-_COLOURS = {
-    ("PSU", "voltage"): "#2196F3",   # blue
-    ("PSU", "current"): "#FF9800",   # orange
-    ("PSU", "power"):   "#4CAF50",   # green
-    ("LOAD", "voltage"): "#9C27B0",  # purple
-    ("LOAD", "current"): "#F44336",  # red
+# ---------------------------------------------------------------------------
+# Colour palette
+# Each entry is a tuple of variants — one per instrument index (cycles if >4).
+# ---------------------------------------------------------------------------
+_COLOUR_TABLE: dict[tuple[str, str], tuple[str, ...]] = {
+    ("PSU",  "voltage"): ("#2196F3", "#64B5F6", "#0D47A1", "#1565C0"),
+    ("PSU",  "current"): ("#FF9800", "#FFB74D", "#E65100", "#BF360C"),
+    ("PSU",  "power"):   ("#4CAF50", "#81C784", "#1B5E20", "#2E7D32"),
+    ("LOAD", "voltage"): ("#9C27B0", "#BA68C8", "#4A148C", "#6A1B9A"),
+    ("LOAD", "current"): ("#F44336", "#EF9A9A", "#B71C1C", "#880E4F"),
 }
 
-# Maximum data points to keep (ring buffer)
+# Maximum data points to keep per curve (ring buffer)
 _MAX_POINTS = 10_000
 
 # Window options: (label, seconds); 0 = "All"
@@ -56,12 +63,22 @@ _WINDOW_OPTIONS = [
 ]
 
 
-class _PlotGroup(QGroupBox):
-    """A single PlotWidget with named curves and limit lines."""
+def _curve_colour(source: str, source_index: int, parameter: str) -> str:
+    """Return a hex colour string for a given source × index × parameter."""
+    variants = _COLOUR_TABLE.get((source, parameter), ("#ffffff",))
+    return variants[source_index % len(variants)]
 
-    def __init__(self, title: str, curves_meta: list[tuple[str, str]], parent=None) -> None:
+
+class _PlotGroup(QGroupBox):
+    """A single PlotWidget that dynamically creates curves for each instrument.
+
+    Curves are created on-demand the first time a sample with a new
+    (source_index, parameter) key arrives.
+    """
+
+    def __init__(self, title: str, source: str, parent=None) -> None:
         super().__init__(title, parent)
-        self._curves_meta = curves_meta  # [(source, parameter), ...]
+        self._source = source  # "PSU" or "LOAD"
 
         pg.setConfigOptions(antialias=True)
         self._plot_widget = pg.PlotWidget()
@@ -71,31 +88,27 @@ class _PlotGroup(QGroupBox):
         self._plot_widget.setLabel("bottom", "Time (s ago)")
         self._plot_widget.addLegend()
 
-        # Ring buffers: key = (source, parameter)
-        self._ts: dict[tuple, deque] = {}
-        self._vals: dict[tuple, deque] = {}
+        # Dynamic ring buffers and curves: key = (source_index, parameter)
+        self._ts:     dict[tuple, deque] = {}
+        self._vals:   dict[tuple, deque] = {}
         self._curves: dict[tuple, pg.PlotDataItem] = {}
-        self._limit_lines: dict[str, pg.InfiniteLine] = {}
 
-        for source, param in curves_meta:
-            key = (source, param)
-            colour = _COLOURS.get(key, "#ffffff")
-            self._ts[key] = deque(maxlen=_MAX_POINTS)
-            self._vals[key] = deque(maxlen=_MAX_POINTS)
-            self._curves[key] = self._plot_widget.plot(
-                [], [],
-                pen=pg.mkPen(colour, width=2),
-                name=f"{source} {param}",
-            )
+        # Dashed limit lines: key = "parameter_min" / "parameter_max"
+        self._limit_lines: dict[str, pg.InfiniteLine] = {}
 
         layout = QVBoxLayout()
         layout.addWidget(self._plot_widget)
         self.setLayout(layout)
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def add_sample(self, sample: TelemetrySample) -> None:
-        key = (sample.source, sample.parameter)
+        """Buffer a new sample, creating a curve if this is a new instrument."""
+        key = (sample.source_index, sample.parameter)
         if key not in self._curves:
-            return
+            self._create_curve(sample.source_index, sample.parameter)
         self._ts[key].append(sample.timestamp)
         self._vals[key].append(sample.value)
 
@@ -120,17 +133,17 @@ class _PlotGroup(QGroupBox):
 
         self._auto_scale_y()
 
-    def update_limits(self, limits: dict[str, LimitPair], source: str) -> None:
+    def update_limits(self, limits: dict[str, LimitPair]) -> None:
         """Redraw dashed limit lines for this group's source."""
-        # Remove existing lines
         for line in self._limit_lines.values():
             self._plot_widget.removeItem(line)
         self._limit_lines.clear()
 
+        prefix = self._source + "_"
         for key_str, pair in limits.items():
-            if not key_str.startswith(source):
+            if not key_str.startswith(prefix):
                 continue
-            param = key_str[len(source) + 1:]  # "PSU_voltage" → "voltage"
+            param = key_str[len(prefix):]  # e.g. "PSU_voltage" → "voltage"
             if pair.max is not None:
                 line = pg.InfiniteLine(
                     pos=pair.max, angle=0,
@@ -160,18 +173,41 @@ class _PlotGroup(QGroupBox):
         now = time.time()
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["timestamp", "source", "parameter", "value"])
-            for (src, param), ts_buf in self._ts.items():
-                vs_buf = self._vals[(src, param)]
+            writer.writerow(["timestamp", "source", "source_index", "parameter", "value"])
+            for (src_idx, param), ts_buf in self._ts.items():
+                vs_buf = self._vals[(src_idx, param)]
                 for t, v in zip(ts_buf, vs_buf):
                     if window_seconds > 0 and t < now - window_seconds:
                         continue
                     writer.writerow([
                         f"{t:.3f}",
-                        src,
+                        self._source,
+                        src_idx,
                         param,
                         f"{v:.6g}",
                     ])
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _create_curve(self, source_index: int, parameter: str) -> None:
+        """Dynamically add a new plot curve for an instrument/parameter combo."""
+        key = (source_index, parameter)
+        colour = _curve_colour(self._source, source_index, parameter)
+        self._ts[key] = deque(maxlen=_MAX_POINTS)
+        self._vals[key] = deque(maxlen=_MAX_POINTS)
+        # Label uses 1-based numbering for readability
+        label = (
+            f"{self._source}-{source_index + 1} {parameter}"
+            if source_index > 0
+            else f"{self._source} {parameter}"
+        )
+        self._curves[key] = self._plot_widget.plot(
+            [], [],
+            pen=pg.mkPen(colour, width=2),
+            name=label,
+        )
 
     def _auto_scale_y(self) -> None:
         """Auto-scale Y axis with 10% headroom."""
@@ -193,14 +229,8 @@ class GraphPanel(QWidget):
         super().__init__(parent)
         self._window_seconds = 60
 
-        self._psu_group = _PlotGroup(
-            "PSU Telemetry",
-            [("PSU", "voltage"), ("PSU", "current"), ("PSU", "power")],
-        )
-        self._load_group = _PlotGroup(
-            "Load Telemetry",
-            [("LOAD", "voltage"), ("LOAD", "current")],
-        )
+        self._psu_group = _PlotGroup("PSU Telemetry", "PSU")
+        self._load_group = _PlotGroup("Load Telemetry", "LOAD")
 
         # Window selector
         self._window_combo = QComboBox()
@@ -209,24 +239,24 @@ class GraphPanel(QWidget):
         self._window_combo.setCurrentIndex(2)  # default: 60s
         self._window_combo.currentIndexChanged.connect(self._on_window_changed)
 
-        # Refresh timer
+        # Refresh timer — 5 fps
         self._timer = pg.QtCore.QTimer()
         self._timer.timeout.connect(self._refresh_plots)
-        self._timer.start(200)  # 5 fps refresh
+        self._timer.start(200)
 
-        # Layout
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Time window:"))
-        top_row.addWidget(self._window_combo)
-        top_row.addStretch()
-
-        # Context menu for export on each plot
+        # Context menu on right-click for each group
         self._psu_group._plot_widget.scene().sigMouseClicked.connect(
             lambda ev: self._on_plot_click(ev, self._psu_group, "PSU")
         )
         self._load_group._plot_widget.scene().sigMouseClicked.connect(
             lambda ev: self._on_plot_click(ev, self._load_group, "Load")
         )
+
+        # Layout
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Time window:"))
+        top_row.addWidget(self._window_combo)
+        top_row.addStretch()
 
         layout = QVBoxLayout()
         layout.addLayout(top_row)
@@ -235,16 +265,16 @@ class GraphPanel(QWidget):
         self.setLayout(layout)
 
     def add_sample(self, sample: TelemetrySample) -> None:
-        """Route sample to the correct plot group."""
+        """Route a telemetry sample to the correct plot group."""
         if sample.source == "PSU":
             self._psu_group.add_sample(sample)
-        else:
+        elif sample.source == "LOAD":
             self._load_group.add_sample(sample)
 
     def update_limits(self, limits: dict[str, LimitPair]) -> None:
         """Update dashed limit lines on both groups."""
-        self._psu_group.update_limits(limits, "PSU")
-        self._load_group.update_limits(limits, "LOAD")
+        self._psu_group.update_limits(limits)
+        self._load_group.update_limits(limits)
 
     # ------------------------------------------------------------------
     # Private
@@ -258,7 +288,6 @@ class GraphPanel(QWidget):
         self._load_group.refresh(self._window_seconds)
 
     def _on_plot_click(self, event, group: _PlotGroup, label: str) -> None:
-        from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QMenu
         if event.button() != Qt.MouseButton.RightButton:
             return
