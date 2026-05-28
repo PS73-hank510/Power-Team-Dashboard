@@ -20,6 +20,7 @@ Signals emitted (for GUI consumption):
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -266,9 +267,9 @@ class TestController(QObject):
         for alert in alerts:
             self._log(alert)
             if "BREACH" in alert:
-                self._notifier.send_alert(alert)
+                self._notify_async(self._notifier.send_alert, alert)
             elif "RESOLVED" in alert:
-                self._notifier.send_resolved(alert)
+                self._notify_async(self._notifier.send_resolved, alert)
 
         # Re-emit for graph and display panels
         self.telemetry_ready.emit(sample)
@@ -278,7 +279,22 @@ class TestController(QObject):
         full_msg = f"COMM ERROR: {message}"
         self._log(full_msg)
         # Alert Teams — test state stays RUNNING as per spec
-        self._notifier.send_alert(full_msg)
+        self._notify_async(self._notifier.send_alert, full_msg)
+
+    def _notify_async(self, fn, message: str) -> None:
+        """Dispatch a Teams notification on a daemon thread.
+
+        The Teams HTTP POST (httpx.post) blocks for up to 10 s (its timeout).
+        Calling it synchronously on the main thread would freeze the GUI and
+        miss telemetry samples for the duration of the request.  A daemon thread
+        keeps the main thread unblocked; the OS cleans it up on exit.
+        """
+        threading.Thread(
+            target=fn,
+            args=(message,),
+            daemon=True,
+            name="teams-notify",
+        ).start()
 
     # ------------------------------------------------------------------
     # Private helpers
