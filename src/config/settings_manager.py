@@ -55,6 +55,9 @@ _DEFAULTS: dict[str, Any] = {
     "serial_write_termination": "\n",   # LF — change to "\r\n" or "\r" for some instruments
     "serial_read_termination": "\n",
     "visa_timeout_ms": 5000,
+    # Optional command sent immediately after port open, before any SCPI query.
+    # e.g. "ADR 10" for TDK-Lambda GENESYS/GEN series (address = unit's RS-232 address).
+    "connect_preamble": "",
 }
 
 # Valid poll rate options (Hz)
@@ -111,6 +114,7 @@ class SettingsManager:
         self.serial_write_termination: str = _DEFAULTS["serial_write_termination"]
         self.serial_read_termination: str = _DEFAULTS["serial_read_termination"]
         self.visa_timeout_ms: int = _DEFAULTS["visa_timeout_ms"]
+        self.connect_preamble: str = _DEFAULTS["connect_preamble"]
 
     # ------------------------------------------------------------------
     # Public API
@@ -159,6 +163,7 @@ class SettingsManager:
         self.serial_write_termination = raw.get("serial_write_termination", _DEFAULTS["serial_write_termination"])
         self.serial_read_termination = raw.get("serial_read_termination", _DEFAULTS["serial_read_termination"])
         self.visa_timeout_ms = int(raw.get("visa_timeout_ms", _DEFAULTS["visa_timeout_ms"]))
+        self.connect_preamble = raw.get("connect_preamble", _DEFAULTS["connect_preamble"])
 
         raw_limits: dict = raw.get("limits", {})
         self.limits = {
@@ -188,6 +193,7 @@ class SettingsManager:
             "serial_write_termination": self.serial_write_termination,
             "serial_read_termination": self.serial_read_termination,
             "visa_timeout_ms": self.visa_timeout_ms,
+            "connect_preamble": self.connect_preamble,
         }
 
         # Atomic write: write to temp file, then rename
@@ -234,6 +240,7 @@ class SettingsManager:
         self.serial_write_termination = _DEFAULTS["serial_write_termination"]
         self.serial_read_termination = _DEFAULTS["serial_read_termination"]
         self.visa_timeout_ms = _DEFAULTS["visa_timeout_ms"]
+        self.connect_preamble = _DEFAULTS["connect_preamble"]
 
     @staticmethod
     def _migrate_visa_strings(

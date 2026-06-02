@@ -36,6 +36,7 @@ class ElectronicLoad(BaseInstrument):
         write_termination: str = "\n",
         read_termination: str = "\n",
         timeout_ms: int = 5000,
+        connect_preamble: str = "",
     ) -> None:
         super().__init__(
             resource_string,
@@ -43,6 +44,7 @@ class ElectronicLoad(BaseInstrument):
             write_termination=write_termination,
             read_termination=read_termination,
             timeout_ms=timeout_ms,
+            connect_preamble=connect_preamble,
         )
 
     # Mode selection command prefix

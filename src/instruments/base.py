@@ -37,12 +37,14 @@ class BaseInstrument(ABC):
         write_termination: str = "\n",
         read_termination: str = "\n",
         timeout_ms: int = 5000,
+        connect_preamble: str = "",
     ) -> None:
         self._resource_string = resource_string
         self._baud_rate = baud_rate
         self._write_termination = write_termination
         self._read_termination = read_termination
         self._timeout_ms = timeout_ms
+        self._connect_preamble = connect_preamble
         self._resource: Optional[pyvisa.resources.Resource] = None
 
     @property
@@ -82,6 +84,17 @@ class BaseInstrument(ABC):
                 self._resource.parity       = vc.Parity.none
                 self._resource.stop_bits    = vc.StopBits.one
                 self._resource.flow_control = vc.ControlFlow.none
+
+            # Optional preamble — sent immediately after port open, before any
+            # SCPI query. Required by some instruments (e.g. TDK-Lambda GEN/
+            # GENESYS series expects "ADR <n>" to select the RS-232 address
+            # before it will respond to any other command).
+            if self._connect_preamble:
+                self._resource.write(self._connect_preamble)
+                try:
+                    self._resource.read()  # consume acknowledgement (e.g. "OK")
+                except pyvisa.Error:
+                    pass  # no acknowledgement — that's fine, carry on
 
         except pyvisa.Error as exc:
             self._resource = None

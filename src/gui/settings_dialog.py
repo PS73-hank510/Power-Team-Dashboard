@@ -113,18 +113,28 @@ class SettingsDialog(QDialog):
         self._timeout_spin.setSingleStep(500)
         self._timeout_spin.setSuffix(" ms")
 
+        self._preamble_field = QLineEdit()
+        self._preamble_field.setPlaceholderText(
+            "e.g. ADR 10  (TDK-Lambda GEN/GENESYS RS-232 address)"
+        )
+
         serial_form = QFormLayout()
         serial_form.addRow("Baud rate:", self._baud_combo)
         serial_form.addRow("Write termination:", self._write_term_combo)
         serial_form.addRow("Read termination:", self._read_term_combo)
         serial_form.addRow("VISA timeout:", self._timeout_spin)
+        serial_form.addRow("Connection preamble:", self._preamble_field)
         serial_form.addRow(
             "",
             QLabel(
                 "<small>Baud rate and termination apply to RS-232 / COM-port "
                 "instruments (ASRL). USB-TMC, GPIB, and LAN instruments ignore "
                 "the baud rate. Increase the timeout if your instrument is slow "
-                "to respond.</small>"
+                "to respond.<br>"
+                "<b>Connection preamble</b>: sent once immediately after the port "
+                "opens, before any SCPI query — required by TDK-Lambda GEN/GENESYS "
+                "and other instruments that need an address handshake "
+                "(e.g. <i>ADR 10</i>). Leave blank for standard instruments.</small>"
             ),
         )
         serial_group.setLayout(serial_form)
@@ -182,6 +192,7 @@ class SettingsDialog(QDialog):
         self._read_term_combo.setCurrentIndex(read_idx)
 
         self._timeout_spin.setValue(self._settings.visa_timeout_ms)
+        self._preamble_field.setText(self._settings.connect_preamble)
 
     def _browse_log_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -215,6 +226,7 @@ class SettingsDialog(QDialog):
         self._settings.serial_write_termination = self._write_term_combo.currentData()
         self._settings.serial_read_termination = self._read_term_combo.currentData()
         self._settings.visa_timeout_ms = self._timeout_spin.value()
+        self._settings.connect_preamble = self._preamble_field.text().strip()
 
         self._settings.save()
         self.accept()

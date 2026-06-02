@@ -267,6 +267,7 @@ class MainWindow(QMainWindow):
         write_term = self._settings.serial_write_termination
         read_term = self._settings.serial_read_termination
         timeout_ms = self._settings.visa_timeout_ms
+        preamble = self._settings.connect_preamble
 
         # Connect all PSUs
         psus: list[PowerSupply] = []
@@ -277,6 +278,7 @@ class MainWindow(QMainWindow):
                 write_termination=write_term,
                 read_termination=read_term,
                 timeout_ms=timeout_ms,
+                connect_preamble=preamble,
             )
             try:
                 psu.connect()
@@ -301,6 +303,7 @@ class MainWindow(QMainWindow):
                 write_termination=write_term,
                 read_termination=read_term,
                 timeout_ms=timeout_ms,
+                connect_preamble=preamble,
             )
             try:
                 load.connect()
