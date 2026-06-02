@@ -61,14 +61,14 @@ class TestStandardSCPI:
         psu, res = _make_connected(PowerSupply)
         res.query.return_value = "12.500"
         v = psu.measure_voltage()
-        res.query.assert_called_with("MEASure:VOLTage[:DC]?")
+        res.query.assert_called_with("MEASure:VOLTage?")
         assert abs(v - 12.5) < 1e-6
 
     def test_measure_current_command(self):
         psu, res = _make_connected(PowerSupply)
         res.query.return_value = "3.000"
         i = psu.measure_current()
-        res.query.assert_called_with("MEASure:CURRent[:DC]?")
+        res.query.assert_called_with("MEASure:CURRent?")
         assert abs(i - 3.0) < 1e-6
 
     def test_measure_power_command(self):
@@ -285,7 +285,7 @@ class TestCommunicationErrors:
     def test_visa_timeout_raises_communication_error_with_command(self):
         psu, res = _make_connected(PowerSupply)
         res.query.side_effect = pyvisa.Error("VI_ERROR_TMO: timeout")
-        with pytest.raises(CommunicationError, match=r"MEASure:VOLTage\[:DC\]\?"):
+        with pytest.raises(CommunicationError, match=r"MEASure:VOLTage\?"):
             psu.measure_voltage()
 
     def test_zplus_visa_timeout_raises_communication_error_with_command(self):

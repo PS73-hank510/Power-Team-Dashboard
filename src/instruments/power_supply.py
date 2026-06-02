@@ -48,9 +48,9 @@ class PowerSupply(BaseInstrument):
         )
 
     # Measurement queries
-    CMD_MEASURE_VOLTAGE = "MEASure:VOLTage[:DC]?"
-    CMD_MEASURE_CURRENT = "MEASure:CURRent[:DC]?"
-    CMD_MEASURE_POWER = "MEASure:POWer?"
+    CMD_MEASURE_VOLTAGE = "MEASure:VOLTage?"
+    CMD_MEASURE_CURRENT = "MEASure:CURRent?"
+    CMD_MEASURE_POWER   = "MEASure:POWer?"
 
     # Setpoint commands (follow with space + value)
     CMD_SET_VOLTAGE = "VOLTage"
