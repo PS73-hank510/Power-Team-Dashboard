@@ -44,13 +44,20 @@ class _SerialAdapter:
     that ``BaseInstrument`` expects from a pyvisa resource, but uses pyserial
     directly so that DTR is never disturbed.
 
-    ``inter_byte_timeout`` (50 ms) allows ``read_until`` to return after a
-    brief silence even when the response does not end with the configured
-    read terminator — handles instruments that terminate with ``\\r`` instead
-    of ``\\r\\n``.
+    Read strategy — two phases:
+    1. Block on the first byte using pyserial's normal ``timeout``  (waits up
+       to ``timeout_ms`` ms for the instrument to start responding).
+    2. Once the first byte arrives, drain remaining bytes until a 50 ms gap
+       appears between chunks, or the configured read terminator is found.
+
+    Why NOT ``inter_byte_timeout``:  on Windows, setting
+    ``ReadIntervalTimeout`` in COMMTIMEOUTS causes ``ReadFile`` to return
+    immediately when the receive buffer is empty — so ``read(1)`` returns
+    ``b''`` at once before the instrument has replied, breaking the loop.
     """
 
-    _INTER_BYTE_TIMEOUT_S: float = 0.05  # 50 ms between-byte silence → return early
+    _GAP_S: float = 0.05   # 50 ms silence between chunks → end of response
+    _POLL_S: float = 0.002  # 2 ms sleep while waiting for more bytes
 
     def __init__(
         self,
@@ -70,6 +77,7 @@ class _SerialAdapter:
         )
         self._timeout_s: float = timeout_ms / 1000.0
 
+        # No inter_byte_timeout — see class docstring for why.
         self._ser = _pyserial.Serial(
             port,
             baudrate=baud_rate,
@@ -78,7 +86,6 @@ class _SerialAdapter:
             stopbits=1,
             timeout=self._timeout_s,
             write_timeout=self._timeout_s,
-            inter_byte_timeout=self._INTER_BYTE_TIMEOUT_S,
         )
 
         # pyvisa-compatible attribute aliases (used by tests / type checkers)
@@ -101,14 +108,39 @@ class _SerialAdapter:
             ) from exc
 
     def read(self) -> str:
-        """Read until terminator or inter-byte timeout.
+        """Read one complete response line.
+
+        Phase 1 — blocks up to ``timeout_ms`` waiting for the first byte.
+        Phase 2 — drains remaining bytes; returns when the terminator is
+        found or when no new bytes arrive within ``_GAP_S`` seconds.
 
         Returns an empty string when nothing is received (does not raise).
         """
-        raw: bytes = self._ser.read_until(self._read_term)
-        if raw.endswith(self._read_term):
-            raw = raw[: -len(self._read_term)]
-        return raw.decode("ascii", errors="replace").strip()
+        import time
+
+        # Phase 1: block until the instrument starts responding
+        first = self._ser.read(1)
+        if not first:
+            return ""   # overall timeout — nothing came back
+
+        buf = bytearray(first)
+
+        # Phase 2: read remaining bytes with gap detection
+        last_rx = time.monotonic()
+        while time.monotonic() - last_rx < self._GAP_S:
+            n = self._ser.in_waiting
+            if n:
+                buf.extend(self._ser.read(n))
+                last_rx = time.monotonic()
+                if buf.endswith(self._read_term):
+                    break
+            else:
+                time.sleep(self._POLL_S)
+
+        # Strip configured terminator (and any stray CR/LF/whitespace)
+        if buf.endswith(self._read_term):
+            buf = buf[: -len(self._read_term)]
+        return buf.decode("ascii", errors="replace").strip()
 
     def query(self, data: str) -> str:
         """write + read.  Raises ``pyvisa.VisaIOError`` on empty response."""

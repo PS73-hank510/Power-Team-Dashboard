@@ -362,8 +362,8 @@ class TestConnectionPreamble:
         serial.Serial rather than pyvisa.ResourceManager.
         """
         mock_ser = MagicMock()
-        # read_until returns b'' → no ack — must not raise
-        mock_ser.read_until.return_value = b""
+        # read(1) returns b'' → no ack (instrument silent) — must not raise
+        mock_ser.read.return_value = b""
         mock_ser.in_waiting = 0
 
         with patch("serial.Serial", return_value=mock_ser):
