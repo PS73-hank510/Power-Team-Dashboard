@@ -356,16 +356,17 @@ class TestConnectionPreamble:
         res.write.assert_not_called()
 
     def test_preamble_read_error_does_not_abort_connect(self):
-        """A timeout reading the preamble ack is silently ignored."""
-        mock_resource = MagicMock()
-        mock_resource.timeout = 5000
-        mock_resource.query.return_value = "0.0"
-        mock_resource.read.side_effect = pyvisa.Error("timeout")  # no OK
+        """A timeout reading the preamble ack is silently ignored.
 
-        mock_rm = MagicMock()
-        mock_rm.open_resource.return_value = mock_resource
+        ASRL resources now use _SerialAdapter (pyserial), so we mock
+        serial.Serial rather than pyvisa.ResourceManager.
+        """
+        mock_ser = MagicMock()
+        # read_until returns b'' → no ack — must not raise
+        mock_ser.read_until.return_value = b""
+        mock_ser.in_waiting = 0
 
-        with patch("pyvisa.ResourceManager", return_value=mock_rm):
+        with patch("serial.Serial", return_value=mock_ser):
             psu = PowerSupply("ASRL4::INSTR", connect_preamble="ADR 10")
             psu.connect()  # must not raise
 

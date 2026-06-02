@@ -5,12 +5,26 @@ can override them without subclassing the full implementation.
 
 Communication errors are wrapped in CommunicationError so callers never
 need to import pyvisa directly.
+
+Transport selection
+-------------------
+* ASRL resources (RS-232 / USB-CDC virtual COM port): handled by
+  ``_SerialAdapter``, a thin pyserial wrapper.  pyvisa-py is **not** used
+  for serial ports because its internal ``SetCommState`` call drives DTR
+  low, which USB-CDC instruments (e.g. TDK-Lambda Z+ via USB-B) interpret
+  as "host offline", causing all queries to time out.
+
+* All other resources (USB-TMC, GPIB, LAN/VXI-11): handled by pyvisa
+  with the ``@py`` pure-Python backend to avoid the NI-VISA library
+  dependency (``VI_ERROR_LIBRARY_NFOUND``).
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Optional
+import re
+import sys
+from abc import ABC
+from typing import Any, Optional
 
 import pyvisa
 
@@ -19,6 +33,129 @@ class CommunicationError(Exception):
     """Raised when a VISA/SCPI communication error occurs."""
 
 
+# ---------------------------------------------------------------------------
+# Internal serial adapter — pyserial wrapped in a pyvisa-compatible interface
+# ---------------------------------------------------------------------------
+
+class _SerialAdapter:
+    """Wraps pyserial as a minimal VISA-compatible resource for ASRL ports.
+
+    Provides the same ``write`` / ``read`` / ``query`` / ``close`` interface
+    that ``BaseInstrument`` expects from a pyvisa resource, but uses pyserial
+    directly so that DTR is never disturbed.
+
+    ``inter_byte_timeout`` (50 ms) allows ``read_until`` to return after a
+    brief silence even when the response does not end with the configured
+    read terminator — handles instruments that terminate with ``\\r`` instead
+    of ``\\r\\n``.
+    """
+
+    _INTER_BYTE_TIMEOUT_S: float = 0.05  # 50 ms between-byte silence → return early
+
+    def __init__(
+        self,
+        port: str,
+        baud_rate: int,
+        timeout_ms: int,
+        write_termination: str,
+        read_termination: str,
+    ) -> None:
+        import serial as _pyserial  # type: ignore[import]
+
+        self._write_term: bytes = (
+            write_termination.encode("ascii") if write_termination else b""
+        )
+        self._read_term: bytes = (
+            read_termination.encode("ascii") if read_termination else b"\n"
+        )
+        self._timeout_s: float = timeout_ms / 1000.0
+
+        self._ser = _pyserial.Serial(
+            port,
+            baudrate=baud_rate,
+            bytesize=8,
+            parity="N",
+            stopbits=1,
+            timeout=self._timeout_s,
+            write_timeout=self._timeout_s,
+            inter_byte_timeout=self._INTER_BYTE_TIMEOUT_S,
+        )
+
+        # pyvisa-compatible attribute aliases (used by tests / type checkers)
+        self.write_termination: str = write_termination
+        self.read_termination: str = read_termination
+        self.timeout: int = timeout_ms
+
+    # ------------------------------------------------------------------
+    # Minimal pyvisa resource interface
+    # ------------------------------------------------------------------
+
+    def write(self, data: str) -> None:
+        """Send *data* followed by the configured write terminator."""
+        raw = data.encode("ascii") + self._write_term
+        try:
+            self._ser.write(raw)
+        except Exception as exc:
+            raise pyvisa.errors.VisaIOError(
+                pyvisa.constants.StatusCode.error_io
+            ) from exc
+
+    def read(self) -> str:
+        """Read until terminator or inter-byte timeout.
+
+        Returns an empty string when nothing is received (does not raise).
+        """
+        raw: bytes = self._ser.read_until(self._read_term)
+        if raw.endswith(self._read_term):
+            raw = raw[: -len(self._read_term)]
+        return raw.decode("ascii", errors="replace").strip()
+
+    def query(self, data: str) -> str:
+        """write + read.  Raises ``pyvisa.VisaIOError`` on empty response."""
+        self._ser.reset_input_buffer()
+        self.write(data)
+        result = self.read()
+        if not result:
+            raise pyvisa.errors.VisaIOError(
+                pyvisa.constants.StatusCode.error_timeout
+            )
+        return result
+
+    def close(self) -> None:
+        """Close the serial port. Safe to call multiple times."""
+        try:
+            self._ser.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _asrl_to_port(resource_string: str) -> str:
+    """Convert an ASRL VISA resource string to a platform COM/tty port.
+
+    Examples:
+        Windows: ``ASRL4::INSTR``  →  ``COM4``
+        Linux:   ``ASRL4::INSTR``  →  ``/dev/ttyS3``
+    """
+    m = re.match(r"ASRL(\d+)::INSTR", resource_string, re.IGNORECASE)
+    if not m:
+        raise CommunicationError(
+            f"Cannot parse ASRL resource string: {resource_string!r}. "
+            "Expected format: ASRL<n>::INSTR"
+        )
+    n = int(m.group(1))
+    if sys.platform == "win32":
+        return f"COM{n}"
+    return f"/dev/ttyS{n - 1}"
+
+
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
+
 class BaseInstrument(ABC):
     """Abstract VISA instrument base.
 
@@ -26,7 +163,7 @@ class BaseInstrument(ABC):
     """
 
     # Standard IEEE 488.2 identity command (common to all SCPI instruments)
-    CMD_IDN = "*IDN?"
+    CMD_IDN   = "*IDN?"
     CMD_RESET = "*RST"
     CMD_CLEAR = "*CLS"
 
@@ -39,13 +176,13 @@ class BaseInstrument(ABC):
         timeout_ms: int = 5000,
         connect_preamble: str = "",
     ) -> None:
-        self._resource_string = resource_string
-        self._baud_rate = baud_rate
-        self._write_termination = write_termination
-        self._read_termination = read_termination
-        self._timeout_ms = timeout_ms
-        self._connect_preamble = connect_preamble
-        self._resource: Optional[pyvisa.resources.Resource] = None
+        self._resource_string    = resource_string
+        self._baud_rate          = baud_rate
+        self._write_termination  = write_termination
+        self._read_termination   = read_termination
+        self._timeout_ms         = timeout_ms
+        self._connect_preamble   = connect_preamble
+        self._resource: Optional[Any] = None  # _SerialAdapter or pyvisa Resource
 
     @property
     def resource_string(self) -> str:
@@ -60,75 +197,56 @@ class BaseInstrument(ABC):
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        """Open the VISA resource and apply session settings.
+        """Open the resource and apply session settings.
 
-        Write/read termination and timeout are applied to every resource type.
-        Baud rate and serial framing (8N1, no flow control) are applied only
-        to ASRL (RS-232 / virtual COM port) resources — they are silently
-        ignored for USB-TMC, GPIB, and TCP/IP resources.
+        * ASRL resources → pyserial via ``_SerialAdapter`` (avoids DTR issue)
+        * All other resources → pyvisa ``@py`` backend
 
-        Raises CommunicationError if the resource cannot be opened.
+        Raises ``CommunicationError`` if the resource cannot be opened.
         """
         try:
-            # '@py' forces the pure-Python pyvisa-py backend — avoids
-            # VI_ERROR_LIBRARY_NFOUND when NI-VISA is not installed.
-            rm = pyvisa.ResourceManager("@py")
-            self._resource = rm.open_resource(self._resource_string)
-            self._resource.timeout = self._timeout_ms
-            self._resource.write_termination = self._write_termination
-            self._resource.read_termination = self._read_termination
-
-            # Serial-specific settings — only meaningful for ASRL resources
             if self._resource_string.upper().startswith("ASRL"):
-                import pyvisa.constants as vc
-                self._resource.baud_rate = self._baud_rate
-                self._resource.data_bits = 8
-                self._resource.parity    = vc.Parity.none
-                self._resource.stop_bits = vc.StopBits.one
-                # NOTE: do NOT set flow_control here.
-                # pyvisa-py maps ControlFlow.none → dsrdtr=False, which on
-                # Windows causes SetCommState to set fDtrControl=
-                # DTR_CONTROL_DISABLE — driving DTR low.  USB-CDC instruments
-                # (TDK-Lambda Z+ via USB-B) interpret DTR=low as "host
-                # offline" and stop responding to all queries.
+                port = _asrl_to_port(self._resource_string)
+                self._resource = _SerialAdapter(
+                    port,
+                    baud_rate=self._baud_rate,
+                    timeout_ms=self._timeout_ms,
+                    write_termination=self._write_termination,
+                    read_termination=self._read_termination,
+                )
+            else:
+                # '@py' forces pure-Python backend — avoids VI_ERROR_LIBRARY_NFOUND
+                rm = pyvisa.ResourceManager("@py")
+                res = rm.open_resource(self._resource_string)
+                res.timeout           = self._timeout_ms
+                res.write_termination = self._write_termination
+                res.read_termination  = self._read_termination
+                self._resource = res
 
-                # After reconfiguring serial params, force DTR high.
-                # Any of the assignments above (baud_rate, data_bits, …)
-                # internally calls SetCommState which may reset DTR to the
-                # dsrdtr-controlled default (low).  Explicitly asserting DTR
-                # keeps both USB-CDC and real RS-232 instruments online.
-                try:
-                    _sess = self._resource.visalib.sessions.get(
-                        self._resource.session
-                    )
-                    if _sess is not None and hasattr(_sess, "interface"):
-                        _sess.interface.dtr = True
-                except Exception:
-                    pass  # non-pyvisa-py backend or no serial — safe to skip
-
-            # Optional preamble — sent immediately after port open, before any
-            # SCPI query. Required by some instruments (e.g. TDK-Lambda GEN/
-            # GENESYS series expects "ADR <n>" to select the RS-232 address
-            # before it will respond to any other command).
+            # Optional preamble — sent once on connect, before any SCPI query.
+            # Required by RS-232 multi-drop instruments (e.g. TDK-Lambda GEN/
+            # GENESYS: "ADR <n>") to select the unit.  Leave blank for USB.
             if self._connect_preamble:
                 self._resource.write(self._connect_preamble)
                 try:
-                    self._resource.read()  # consume acknowledgement (e.g. "OK")
-                except pyvisa.Error:
-                    pass  # no acknowledgement — that's fine, carry on
+                    self._resource.read()   # consume ack (e.g. "OK")
+                except Exception:
+                    pass                    # no ack — that's fine, carry on
 
-        except pyvisa.Error as exc:
+        except CommunicationError:
+            raise
+        except Exception as exc:
             self._resource = None
             raise CommunicationError(
                 f"Failed to connect to {self._resource_string}: {exc}"
             ) from exc
 
     def disconnect(self) -> None:
-        """Close the VISA resource. Safe to call even if not connected."""
+        """Close the resource. Safe to call even if not connected."""
         if self._resource is not None:
             try:
                 self._resource.close()
-            except pyvisa.Error:
+            except Exception:
                 pass
             finally:
                 self._resource = None
@@ -136,7 +254,7 @@ class BaseInstrument(ABC):
     def identify(self) -> str:
         """Send *IDN? and return the instrument identification string.
 
-        Raises CommunicationError on failure.
+        Raises ``CommunicationError`` on failure.
         """
         return self._query(self.CMD_IDN)
 
@@ -145,7 +263,7 @@ class BaseInstrument(ABC):
     # ------------------------------------------------------------------
 
     def _ensure_connected(self) -> None:
-        """Raise CommunicationError if no VISA resource is open."""
+        """Raise ``CommunicationError`` if no resource is open."""
         if self._resource is None:
             raise CommunicationError("Not connected. Call connect() first.")
 
