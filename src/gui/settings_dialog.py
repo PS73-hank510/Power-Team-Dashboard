@@ -1,4 +1,5 @@
-"""Settings dialog — poll rate, instrument control flags, log folder, Teams URL."""
+"""Settings dialog — poll rate, instrument control flags, log folder, Teams URL,
+and serial-port / VISA session parameters."""
 
 from __future__ import annotations
 
@@ -15,10 +16,22 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
+    QSpinBox,
     QVBoxLayout,
 )
 
 from src.config.settings_manager import POLL_RATE_OPTIONS, SettingsManager
+
+# Baud-rate options (most common RS-232 speeds)
+_BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+
+# Line-termination options: (display label, Python string value)
+_TERMINATIONS = [
+    ("LF  (\\n)",    "\n"),
+    ("CR+LF  (\\r\\n)", "\r\n"),
+    ("CR  (\\r)",    "\r"),
+    ("None  (\"\")",  ""),
+]
 
 
 class SettingsDialog(QDialog):
@@ -80,6 +93,42 @@ class SettingsDialog(QDialog):
         teams_form.addRow("Webhook URL:", self._webhook_field)
         teams_group.setLayout(teams_form)
 
+        # ── Serial Port / VISA ─────────────────────────────────────
+        serial_group = QGroupBox("Serial Port / VISA Session")
+
+        self._baud_combo = QComboBox()
+        for baud in _BAUD_RATES:
+            self._baud_combo.addItem(str(baud), baud)
+
+        self._write_term_combo = QComboBox()
+        for label, val in _TERMINATIONS:
+            self._write_term_combo.addItem(label, val)
+
+        self._read_term_combo = QComboBox()
+        for label, val in _TERMINATIONS:
+            self._read_term_combo.addItem(label, val)
+
+        self._timeout_spin = QSpinBox()
+        self._timeout_spin.setRange(100, 60_000)
+        self._timeout_spin.setSingleStep(500)
+        self._timeout_spin.setSuffix(" ms")
+
+        serial_form = QFormLayout()
+        serial_form.addRow("Baud rate:", self._baud_combo)
+        serial_form.addRow("Write termination:", self._write_term_combo)
+        serial_form.addRow("Read termination:", self._read_term_combo)
+        serial_form.addRow("VISA timeout:", self._timeout_spin)
+        serial_form.addRow(
+            "",
+            QLabel(
+                "<small>Baud rate and termination apply to RS-232 / COM-port "
+                "instruments (ASRL). USB-TMC, GPIB, and LAN instruments ignore "
+                "the baud rate. Increase the timeout if your instrument is slow "
+                "to respond.</small>"
+            ),
+        )
+        serial_group.setLayout(serial_form)
+
         # ── Buttons ────────────────────────────────────────────────
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -92,6 +141,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(instr_group)
         layout.addWidget(log_group)
         layout.addWidget(teams_group)
+        layout.addWidget(serial_group)
         layout.addWidget(buttons)
         self.setLayout(layout)
 
@@ -108,6 +158,30 @@ class SettingsDialog(QDialog):
         self._load_input_cb.setChecked(self._settings.control_load_input)
         self._log_dir_field.setText(self._settings.log_directory)
         self._webhook_field.setText(self._settings.teams_webhook_url)
+
+        # Serial / VISA
+        baud_idx = next(
+            (i for i, b in enumerate(_BAUD_RATES)
+             if b == self._settings.serial_baud_rate),
+            _BAUD_RATES.index(9600),
+        )
+        self._baud_combo.setCurrentIndex(baud_idx)
+
+        write_idx = next(
+            (i for i, (_, v) in enumerate(_TERMINATIONS)
+             if v == self._settings.serial_write_termination),
+            0,
+        )
+        self._write_term_combo.setCurrentIndex(write_idx)
+
+        read_idx = next(
+            (i for i, (_, v) in enumerate(_TERMINATIONS)
+             if v == self._settings.serial_read_termination),
+            0,
+        )
+        self._read_term_combo.setCurrentIndex(read_idx)
+
+        self._timeout_spin.setValue(self._settings.visa_timeout_ms)
 
     def _browse_log_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -135,5 +209,12 @@ class SettingsDialog(QDialog):
         self._settings.control_load_input = self._load_input_cb.isChecked()
         self._settings.log_directory = self._log_dir_field.text()
         self._settings.teams_webhook_url = url
+
+        # Serial / VISA
+        self._settings.serial_baud_rate = self._baud_combo.currentData()
+        self._settings.serial_write_termination = self._write_term_combo.currentData()
+        self._settings.serial_read_termination = self._read_term_combo.currentData()
+        self._settings.visa_timeout_ms = self._timeout_spin.value()
+
         self._settings.save()
         self.accept()

@@ -262,10 +262,22 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Serial / VISA session params from settings
+        baud = self._settings.serial_baud_rate
+        write_term = self._settings.serial_write_termination
+        read_term = self._settings.serial_read_termination
+        timeout_ms = self._settings.visa_timeout_ms
+
         # Connect all PSUs
         psus: list[PowerSupply] = []
         for visa in psu_visas:
-            psu = PowerSupply(visa)
+            psu = PowerSupply(
+                visa,
+                baud_rate=baud,
+                write_termination=write_term,
+                read_termination=read_term,
+                timeout_ms=timeout_ms,
+            )
             try:
                 psu.connect()
                 psus.append(psu)
@@ -283,7 +295,13 @@ class MainWindow(QMainWindow):
         # Connect all loads (may be empty for PSU-only)
         loads: list[ElectronicLoad] = []
         for visa in load_visas:
-            load = ElectronicLoad(visa)
+            load = ElectronicLoad(
+                visa,
+                baud_rate=baud,
+                write_termination=write_term,
+                read_termination=read_term,
+                timeout_ms=timeout_ms,
+            )
             try:
                 load.connect()
                 loads.append(load)

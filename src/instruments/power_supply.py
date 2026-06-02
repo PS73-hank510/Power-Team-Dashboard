@@ -20,6 +20,22 @@ class PowerSupply(BaseInstrument):
     All command strings are class attributes — override for non-standard instruments.
     """
 
+    def __init__(
+        self,
+        resource_string: str,
+        baud_rate: int = 9600,
+        write_termination: str = "\n",
+        read_termination: str = "\n",
+        timeout_ms: int = 5000,
+    ) -> None:
+        super().__init__(
+            resource_string,
+            baud_rate=baud_rate,
+            write_termination=write_termination,
+            read_termination=read_termination,
+            timeout_ms=timeout_ms,
+        )
+
     # Measurement queries
     CMD_MEASURE_VOLTAGE = "MEASure:VOLTage[:DC]?"
     CMD_MEASURE_CURRENT = "MEASure:CURRent[:DC]?"

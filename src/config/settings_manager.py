@@ -50,6 +50,11 @@ _DEFAULTS: dict[str, Any] = {
     "last_load_mode": "CC",
     "graph_window_seconds": 60,
     "limits": {},  # key: "PSU_voltage" → {"min": null, "max": null}
+    # Serial-port settings (apply to ASRL/COM-port resources; ignored for USB-TMC/GPIB/LAN)
+    "serial_baud_rate": 9600,
+    "serial_write_termination": "\n",   # LF — change to "\r\n" or "\r" for some instruments
+    "serial_read_termination": "\n",
+    "visa_timeout_ms": 5000,
 }
 
 # Valid poll rate options (Hz)
@@ -101,6 +106,12 @@ class SettingsManager:
         # Limits: maps parameter key (e.g. "PSU_voltage") to LimitPair
         self.limits: dict[str, LimitPair] = {}
 
+        # Serial-port / VISA session settings
+        self.serial_baud_rate: int = _DEFAULTS["serial_baud_rate"]
+        self.serial_write_termination: str = _DEFAULTS["serial_write_termination"]
+        self.serial_read_termination: str = _DEFAULTS["serial_read_termination"]
+        self.visa_timeout_ms: int = _DEFAULTS["visa_timeout_ms"]
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -144,6 +155,10 @@ class SettingsManager:
         self.control_load_input = bool(raw.get("control_load_input", _DEFAULTS["control_load_input"]))
         self.last_load_mode = raw.get("last_load_mode", _DEFAULTS["last_load_mode"])
         self.graph_window_seconds = int(raw.get("graph_window_seconds", _DEFAULTS["graph_window_seconds"]))
+        self.serial_baud_rate = int(raw.get("serial_baud_rate", _DEFAULTS["serial_baud_rate"]))
+        self.serial_write_termination = raw.get("serial_write_termination", _DEFAULTS["serial_write_termination"])
+        self.serial_read_termination = raw.get("serial_read_termination", _DEFAULTS["serial_read_termination"])
+        self.visa_timeout_ms = int(raw.get("visa_timeout_ms", _DEFAULTS["visa_timeout_ms"]))
 
         raw_limits: dict = raw.get("limits", {})
         self.limits = {
@@ -169,6 +184,10 @@ class SettingsManager:
             "last_load_mode": self.last_load_mode,
             "graph_window_seconds": self.graph_window_seconds,
             "limits": {key: pair.to_dict() for key, pair in self.limits.items()},
+            "serial_baud_rate": self.serial_baud_rate,
+            "serial_write_termination": self.serial_write_termination,
+            "serial_read_termination": self.serial_read_termination,
+            "visa_timeout_ms": self.visa_timeout_ms,
         }
 
         # Atomic write: write to temp file, then rename
@@ -211,6 +230,10 @@ class SettingsManager:
         self.last_load_mode = _DEFAULTS["last_load_mode"]
         self.graph_window_seconds = _DEFAULTS["graph_window_seconds"]
         self.limits = {}
+        self.serial_baud_rate = _DEFAULTS["serial_baud_rate"]
+        self.serial_write_termination = _DEFAULTS["serial_write_termination"]
+        self.serial_read_termination = _DEFAULTS["serial_read_termination"]
+        self.visa_timeout_ms = _DEFAULTS["visa_timeout_ms"]
 
     @staticmethod
     def _migrate_visa_strings(

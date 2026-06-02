@@ -30,8 +30,19 @@ class BaseInstrument(ABC):
     CMD_RESET = "*RST"
     CMD_CLEAR = "*CLS"
 
-    def __init__(self, resource_string: str) -> None:
+    def __init__(
+        self,
+        resource_string: str,
+        baud_rate: int = 9600,
+        write_termination: str = "\n",
+        read_termination: str = "\n",
+        timeout_ms: int = 5000,
+    ) -> None:
         self._resource_string = resource_string
+        self._baud_rate = baud_rate
+        self._write_termination = write_termination
+        self._read_termination = read_termination
+        self._timeout_ms = timeout_ms
         self._resource: Optional[pyvisa.resources.Resource] = None
 
     @property
@@ -47,14 +58,31 @@ class BaseInstrument(ABC):
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        """Open the VISA resource.
+        """Open the VISA resource and apply session settings.
+
+        Write/read termination and timeout are applied to every resource type.
+        Baud rate and serial framing (8N1, no flow control) are applied only
+        to ASRL (RS-232 / virtual COM port) resources — they are silently
+        ignored for USB-TMC, GPIB, and TCP/IP resources.
 
         Raises CommunicationError if the resource cannot be opened.
         """
         try:
             rm = pyvisa.ResourceManager()
             self._resource = rm.open_resource(self._resource_string)
-            self._resource.timeout = 5000  # ms
+            self._resource.timeout = self._timeout_ms
+            self._resource.write_termination = self._write_termination
+            self._resource.read_termination = self._read_termination
+
+            # Serial-specific settings — only meaningful for ASRL resources
+            if self._resource_string.upper().startswith("ASRL"):
+                import pyvisa.constants as vc
+                self._resource.baud_rate    = self._baud_rate
+                self._resource.data_bits    = 8
+                self._resource.parity       = vc.Parity.none
+                self._resource.stop_bits    = vc.StopBits.one
+                self._resource.flow_control = vc.ControlFlow.none
+
         except pyvisa.Error as exc:
             self._resource = None
             raise CommunicationError(
