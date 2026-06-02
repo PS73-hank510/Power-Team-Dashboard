@@ -70,7 +70,9 @@ class BaseInstrument(ABC):
         Raises CommunicationError if the resource cannot be opened.
         """
         try:
-            rm = pyvisa.ResourceManager()
+            # '@py' forces the pure-Python pyvisa-py backend — avoids
+            # VI_ERROR_LIBRARY_NFOUND when NI-VISA is not installed.
+            rm = pyvisa.ResourceManager("@py")
             self._resource = rm.open_resource(self._resource_string)
             self._resource.timeout = self._timeout_ms
             self._resource.write_termination = self._write_termination
@@ -79,11 +81,18 @@ class BaseInstrument(ABC):
             # Serial-specific settings — only meaningful for ASRL resources
             if self._resource_string.upper().startswith("ASRL"):
                 import pyvisa.constants as vc
-                self._resource.baud_rate    = self._baud_rate
-                self._resource.data_bits    = 8
-                self._resource.parity       = vc.Parity.none
-                self._resource.stop_bits    = vc.StopBits.one
-                self._resource.flow_control = vc.ControlFlow.none
+                self._resource.baud_rate = self._baud_rate
+                self._resource.data_bits = 8
+                self._resource.parity    = vc.Parity.none
+                self._resource.stop_bits = vc.StopBits.one
+                # NOTE: do NOT set flow_control here.
+                # On USB-CDC (virtual COM port) instruments such as the
+                # TDK-Lambda Z+ series, pyvisa-py translates
+                # ControlFlow.none → dsrdtr=False → DTR driven low, which
+                # the instrument interprets as "host offline" and it stops
+                # responding.  Leaving flow_control at the pyvisa-py default
+                # (inherited from pyserial's open-time default: DTR asserted)
+                # keeps the instrument online for both real RS-232 and USB-CDC.
 
             # Optional preamble — sent immediately after port open, before any
             # SCPI query. Required by some instruments (e.g. TDK-Lambda GEN/
