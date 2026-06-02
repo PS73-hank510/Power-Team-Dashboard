@@ -86,13 +86,25 @@ class BaseInstrument(ABC):
                 self._resource.parity    = vc.Parity.none
                 self._resource.stop_bits = vc.StopBits.one
                 # NOTE: do NOT set flow_control here.
-                # On USB-CDC (virtual COM port) instruments such as the
-                # TDK-Lambda Z+ series, pyvisa-py translates
-                # ControlFlow.none → dsrdtr=False → DTR driven low, which
-                # the instrument interprets as "host offline" and it stops
-                # responding.  Leaving flow_control at the pyvisa-py default
-                # (inherited from pyserial's open-time default: DTR asserted)
-                # keeps the instrument online for both real RS-232 and USB-CDC.
+                # pyvisa-py maps ControlFlow.none → dsrdtr=False, which on
+                # Windows causes SetCommState to set fDtrControl=
+                # DTR_CONTROL_DISABLE — driving DTR low.  USB-CDC instruments
+                # (TDK-Lambda Z+ via USB-B) interpret DTR=low as "host
+                # offline" and stop responding to all queries.
+
+                # After reconfiguring serial params, force DTR high.
+                # Any of the assignments above (baud_rate, data_bits, …)
+                # internally calls SetCommState which may reset DTR to the
+                # dsrdtr-controlled default (low).  Explicitly asserting DTR
+                # keeps both USB-CDC and real RS-232 instruments online.
+                try:
+                    _sess = self._resource.visalib.sessions.get(
+                        self._resource.session
+                    )
+                    if _sess is not None and hasattr(_sess, "interface"):
+                        _sess.interface.dtr = True
+                except Exception:
+                    pass  # non-pyvisa-py backend or no serial — safe to skip
 
             # Optional preamble — sent immediately after port open, before any
             # SCPI query. Required by some instruments (e.g. TDK-Lambda GEN/
