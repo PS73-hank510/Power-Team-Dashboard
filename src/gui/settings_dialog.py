@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.config.settings_manager import POLL_RATE_OPTIONS, SettingsManager
+from src.config.settings_manager import POLL_RATE_OPTIONS, PSU_PROFILE_LABELS, SettingsManager
 
 # Baud-rate options (most common RS-232 speeds)
 _BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
@@ -61,14 +61,26 @@ class SettingsDialog(QDialog):
 
         # ── Instrument Control ─────────────────────────────────────
         instr_group = QGroupBox("Instrument Control")
+
+        self._psu_profile_combo = QComboBox()
+        for key, label in PSU_PROFILE_LABELS.items():
+            self._psu_profile_combo.addItem(label, key)
+
         self._psu_output_cb = QCheckBox("Control PSU output on Start/Stop")
         self._load_input_cb = QCheckBox("Control Load input on Start/Stop")
+
+        instr_form = QFormLayout()
+        instr_form.addRow("PSU command profile:", self._psu_profile_combo)
+
         instr_layout = QVBoxLayout()
+        instr_layout.addLayout(instr_form)
         instr_layout.addWidget(self._psu_output_cb)
         instr_layout.addWidget(self._load_input_cb)
         instr_layout.addWidget(QLabel(
-            "<small>When enabled, the dashboard sends OUTPut/INPut ON/OFF "
-            "commands automatically on test start and stop.</small>"))
+            "<small>Select the command set that matches your power supply. "
+            "Takes effect on the next Connect.<br>"
+            "When <i>Control PSU/Load output</i> is enabled, the dashboard sends "
+            "ON/OFF commands automatically on test start and stop.</small>"))
         instr_group.setLayout(instr_layout)
 
         # ── Logging ────────────────────────────────────────────────
@@ -164,6 +176,13 @@ class SettingsDialog(QDialog):
         )
         self._poll_combo.setCurrentIndex(idx)
 
+        profile_idx = next(
+            (i for i, k in enumerate(PSU_PROFILE_LABELS)
+             if k == self._settings.psu_command_profile),
+            0,
+        )
+        self._psu_profile_combo.setCurrentIndex(profile_idx)
+
         self._psu_output_cb.setChecked(self._settings.control_psu_output)
         self._load_input_cb.setChecked(self._settings.control_load_input)
         self._log_dir_field.setText(self._settings.log_directory)
@@ -216,6 +235,7 @@ class SettingsDialog(QDialog):
             return
 
         self._settings.poll_rate_hz = self._poll_combo.currentData()
+        self._settings.psu_command_profile = self._psu_profile_combo.currentData()
         self._settings.control_psu_output = self._psu_output_cb.isChecked()
         self._settings.control_load_input = self._load_input_cb.isChecked()
         self._settings.log_directory = self._log_dir_field.text()

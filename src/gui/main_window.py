@@ -37,7 +37,7 @@ from src.gui.load_panel import LoadPanel
 from src.gui.psu_panel import PsuPanel
 from src.gui.settings_dialog import SettingsDialog
 from src.instruments.electronic_load import ElectronicLoad
-from src.instruments.power_supply import PowerSupply
+from src.instruments.power_supply import PSU_PROFILES, PowerSupply
 from src.instruments.base import CommunicationError
 
 
@@ -269,10 +269,15 @@ class MainWindow(QMainWindow):
         timeout_ms = self._settings.visa_timeout_ms
         preamble = self._settings.connect_preamble
 
+        # PSU class chosen by the command-profile setting
+        PSUClass = PSU_PROFILES.get(
+            self._settings.psu_command_profile, PowerSupply
+        )
+
         # Connect all PSUs
         psus: list[PowerSupply] = []
         for visa in psu_visas:
-            psu = PowerSupply(
+            psu = PSUClass(
                 visa,
                 baud_rate=baud,
                 write_termination=write_term,
