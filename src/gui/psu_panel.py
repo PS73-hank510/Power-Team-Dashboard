@@ -121,7 +121,7 @@ class PsuPanel(QGroupBox):
         # ── Layout ───────────────────────────────────────────────────
         form = QFormLayout()
         form.addRow("Voltage Setpoint:", self._voltage_spin)
-        form.addRow("Current Limit:", self._current_spin)
+        form.addRow("Current Setpoint:", self._current_spin)
 
         form.addRow("─" * 20, QLabel(""))
         form.addRow("Measured Voltage:", self._v_label)
