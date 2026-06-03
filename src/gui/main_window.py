@@ -386,18 +386,44 @@ class MainWindow(QMainWindow):
     def _on_psu_setpoint_changed(
         self, idx: int, voltage: float, current: float
     ) -> None:
-        """Send setpoint changes to the indexed PSU (if connected)."""
+        """Send voltage and current setpoints to the indexed PSU independently.
+
+        Each command is attempted in its own try block so a voltage failure
+        does not silently prevent the current command from being sent.
+        Successes and failures are both logged to the alerts panel so the
+        operator can confirm what reached the instrument.
+        """
         if self._controller.state not in (
             TestState.CONNECTED, TestState.STOPPED, TestState.RUNNING
         ):
             return
-        if idx < len(self._controller._psus):
-            try:
-                psu = self._controller._psus[idx]
-                psu.set_voltage(voltage)
-                psu.set_current(current)
-            except CommunicationError as exc:
-                self._alerts_log.append_entry(f"[PSU-{idx}] Setpoint error: {exc}")
+        if idx >= len(self._controller._psus):
+            return
+
+        psu = self._controller._psus[idx]
+        tag = f"PSU-{idx}"
+
+        # ── Voltage ──────────────────────────────────────────────────
+        try:
+            psu.set_voltage(voltage)
+            self._alerts_log.append_entry(
+                f"[{tag}] Voltage setpoint applied: {voltage:.3f} V"
+            )
+        except CommunicationError as exc:
+            self._alerts_log.append_entry(
+                f"[{tag}] Voltage setpoint FAILED: {exc}"
+            )
+
+        # ── Current ──────────────────────────────────────────────────
+        try:
+            psu.set_current(current)
+            self._alerts_log.append_entry(
+                f"[{tag}] Current setpoint applied: {current:.3f} A"
+            )
+        except CommunicationError as exc:
+            self._alerts_log.append_entry(
+                f"[{tag}] Current setpoint FAILED: {exc}"
+            )
 
     def _on_psu_output_requested(self, idx: int, on: bool) -> None:
         """Turn the indexed PSU output on or off."""
