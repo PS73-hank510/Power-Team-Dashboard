@@ -172,6 +172,25 @@ class ElectronicLoad(BaseInstrument):
         self._write(self.CMD_INPUT_OFF)
 
 
+class ShortScpiElectronicLoad(ElectronicLoad):
+    """Electronic load profile using abbreviated SCPI command forms.
+
+    Use this for instruments whose firmware accepts short-form SCPI
+    (e.g. 'MEAS:VOLT?' instead of 'MEASure:VOLTage?').
+
+    Override further CMD_* attributes in a sub-subclass if your instrument
+    deviates from these short forms.
+    """
+    CMD_MEASURE_VOLTAGE = "MEAS:VOLT?"
+    CMD_MEASURE_CURRENT = "MEAS:CURR?"
+    CMD_SET_MODE        = "FUNC"
+    CMD_QUERY_MODE      = "FUNC?"
+    CMD_INPUT_ON        = "INP ON"
+    CMD_INPUT_OFF       = "INP OFF"
+    CMD_QUERY_INPUT     = "INP?"
+
+
 LOAD_PROFILES: dict[str, type[ElectronicLoad]] = {
-    "standard_scpi": ElectronicLoad,
+    "standard_scpi":   ElectronicLoad,
+    "short_scpi":      ShortScpiElectronicLoad,
 }

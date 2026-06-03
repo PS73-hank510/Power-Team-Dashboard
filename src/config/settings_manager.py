@@ -66,6 +66,12 @@ _DEFAULTS: dict[str, Any] = {
     # Load command profile — selects which ElectronicLoad subclass to instantiate.
     # Must match a key in LOAD_PROFILES (electronic_load.py).
     "load_command_profile": "standard_scpi",
+    # Load-specific serial-port / VISA session settings (independent from PSU).
+    # Falls back to shared PSU values when loading an old config.
+    "load_serial_baud_rate": 9600,
+    "load_serial_write_termination": "\n",
+    "load_serial_read_termination": "\n",
+    "load_visa_timeout_ms": 5000,
 }
 
 # Human-readable labels for the PSU profile dropdown (key → display string)
@@ -77,6 +83,7 @@ PSU_PROFILE_LABELS: dict[str, str] = {
 # Human-readable labels for the Load profile dropdown (key → display string)
 LOAD_PROFILE_LABELS: dict[str, str] = {
     "standard_scpi": "Standard SCPI  (BK Precision, Chroma, Rigol, …)",
+    "short_scpi": "Short SCPI  (abbreviated MEAS:VOLT?, FUNC, INP ON/OFF)",
 }
 
 # Valid poll rate options (Hz)
@@ -128,7 +135,7 @@ class SettingsManager:
         # Limits: maps parameter key (e.g. "PSU_voltage") to LimitPair
         self.limits: dict[str, LimitPair] = {}
 
-        # Serial-port / VISA session settings
+        # Serial-port / VISA session settings (PSU)
         self.serial_baud_rate: int = _DEFAULTS["serial_baud_rate"]
         self.serial_write_termination: str = _DEFAULTS["serial_write_termination"]
         self.serial_read_termination: str = _DEFAULTS["serial_read_termination"]
@@ -137,6 +144,11 @@ class SettingsManager:
         self.load_connect_preamble: str = _DEFAULTS["load_connect_preamble"]
         self.psu_command_profile: str = _DEFAULTS["psu_command_profile"]
         self.load_command_profile: str = _DEFAULTS["load_command_profile"]
+        # Load-specific serial-port / VISA session settings (independent from PSU)
+        self.load_serial_baud_rate: int = _DEFAULTS["load_serial_baud_rate"]
+        self.load_serial_write_termination: str = _DEFAULTS["load_serial_write_termination"]
+        self.load_serial_read_termination: str = _DEFAULTS["load_serial_read_termination"]
+        self.load_visa_timeout_ms: int = _DEFAULTS["load_visa_timeout_ms"]
 
     # ------------------------------------------------------------------
     # Public API
@@ -186,6 +198,20 @@ class SettingsManager:
         self.serial_read_termination = raw.get("serial_read_termination", _DEFAULTS["serial_read_termination"])
         self.visa_timeout_ms = int(raw.get("visa_timeout_ms", _DEFAULTS["visa_timeout_ms"]))
 
+        # Load-specific serial / VISA settings — fall back to shared PSU values for old configs
+        self.load_serial_baud_rate = int(raw.get(
+            "load_serial_baud_rate", raw.get("serial_baud_rate", _DEFAULTS["load_serial_baud_rate"])
+        ))
+        self.load_serial_write_termination = raw.get(
+            "load_serial_write_termination", raw.get("serial_write_termination", _DEFAULTS["load_serial_write_termination"])
+        )
+        self.load_serial_read_termination = raw.get(
+            "load_serial_read_termination", raw.get("serial_read_termination", _DEFAULTS["load_serial_read_termination"])
+        )
+        self.load_visa_timeout_ms = int(raw.get(
+            "load_visa_timeout_ms", raw.get("visa_timeout_ms", _DEFAULTS["load_visa_timeout_ms"])
+        ))
+
         # Preamble migration: old configs stored a single "connect_preamble";
         # migrate it to psu_connect_preamble so existing setups keep working.
         _legacy_preamble = raw.get("connect_preamble", "")
@@ -231,6 +257,10 @@ class SettingsManager:
             "load_connect_preamble": self.load_connect_preamble,
             "psu_command_profile": self.psu_command_profile,
             "load_command_profile": self.load_command_profile,
+            "load_serial_baud_rate": self.load_serial_baud_rate,
+            "load_serial_write_termination": self.load_serial_write_termination,
+            "load_serial_read_termination": self.load_serial_read_termination,
+            "load_visa_timeout_ms": self.load_visa_timeout_ms,
         }
 
         # Atomic write: write to temp file, then rename
@@ -281,6 +311,10 @@ class SettingsManager:
         self.load_connect_preamble = _DEFAULTS["load_connect_preamble"]
         self.psu_command_profile = _DEFAULTS["psu_command_profile"]
         self.load_command_profile = _DEFAULTS["load_command_profile"]
+        self.load_serial_baud_rate = _DEFAULTS["load_serial_baud_rate"]
+        self.load_serial_write_termination = _DEFAULTS["load_serial_write_termination"]
+        self.load_serial_read_termination = _DEFAULTS["load_serial_read_termination"]
+        self.load_visa_timeout_ms = _DEFAULTS["load_visa_timeout_ms"]
 
     @staticmethod
     def _migrate_visa_strings(

@@ -265,15 +265,21 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Serial / VISA session params from settings
+        # PSU serial / VISA session params from settings
         baud = self._settings.serial_baud_rate
         write_term = self._settings.serial_write_termination
         read_term = self._settings.serial_read_termination
         timeout_ms = self._settings.visa_timeout_ms
 
+        # Load serial/VISA settings — independent from PSU
+        load_baud      = self._settings.load_serial_baud_rate
+        load_write_term = self._settings.load_serial_write_termination
+        load_read_term  = self._settings.load_serial_read_termination
+        load_timeout_ms = self._settings.load_visa_timeout_ms
+
         # Per-instrument preambles and profiles
         psu_preamble = self._settings.psu_connect_preamble
-        load_preamble = self._settings.load_connect_preamble
+        load_preamble   = self._settings.load_connect_preamble
 
         PSUClass = PSU_PROFILES.get(self._settings.psu_command_profile, PowerSupply)
         LoadClass = LOAD_PROFILES.get(self._settings.load_command_profile, ElectronicLoad)
@@ -308,10 +314,10 @@ class MainWindow(QMainWindow):
         for visa in load_visas:
             load = LoadClass(
                 visa,
-                baud_rate=baud,
-                write_termination=write_term,
-                read_termination=read_term,
-                timeout_ms=timeout_ms,
+                baud_rate=load_baud,
+                write_termination=load_write_term,
+                read_termination=load_read_term,
+                timeout_ms=load_timeout_ms,
                 connect_preamble=load_preamble,
             )
             try:

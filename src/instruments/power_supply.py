@@ -56,6 +56,10 @@ class PowerSupply(BaseInstrument):
     CMD_SET_VOLTAGE = "VOLTage"
     CMD_SET_CURRENT = "CURRent"
 
+    # Setpoint read-back queries (verify what the instrument stored)
+    CMD_QUERY_VOLTAGE_SETPOINT = "VOLTage?"
+    CMD_QUERY_CURRENT_SETPOINT = "CURRent?"
+
     # Output control
     CMD_OUTPUT_ON = "OUTPut ON"
     CMD_OUTPUT_OFF = "OUTPut OFF"
@@ -105,11 +109,27 @@ class PowerSupply(BaseInstrument):
         self._write(f"{self.CMD_SET_VOLTAGE} {voltage:.6g}")
 
     def set_current(self, current: float) -> None:
-        """Set the output current limit in amperes.
+        """Set the output current setpoint in amperes.
 
         Raises CommunicationError on VISA failure.
         """
         self._write(f"{self.CMD_SET_CURRENT} {current:.6g}")
+
+    def get_voltage_setpoint(self) -> float:
+        """Read back the programmed voltage setpoint from the instrument.
+
+        Use after set_voltage() to confirm the instrument accepted the value.
+        Raises CommunicationError on VISA failure or unparseable response.
+        """
+        return self._query_float(self.CMD_QUERY_VOLTAGE_SETPOINT)
+
+    def get_current_setpoint(self) -> float:
+        """Read back the programmed current setpoint from the instrument.
+
+        Use after set_current() to confirm the instrument accepted the value.
+        Raises CommunicationError on VISA failure or unparseable response.
+        """
+        return self._query_float(self.CMD_QUERY_CURRENT_SETPOINT)
 
     # ------------------------------------------------------------------
     # Output state
@@ -155,6 +175,10 @@ class TDKLambdaZPlus(PowerSupply):
     # Setpoints (write as "PV 12.5", "PC 3.0")
     CMD_SET_VOLTAGE = "PV"
     CMD_SET_CURRENT = "PC"
+
+    # Setpoint read-back
+    CMD_QUERY_VOLTAGE_SETPOINT = "PV?"
+    CMD_QUERY_CURRENT_SETPOINT = "PC?"
 
     # Output control
     CMD_OUTPUT_ON    = "OUT 1"

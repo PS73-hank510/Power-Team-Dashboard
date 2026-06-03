@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, call, patch
 import pyvisa
 
 from src.instruments.base import CommunicationError
-from src.instruments.electronic_load import ElectronicLoad
+from src.instruments.electronic_load import LOAD_PROFILES, ElectronicLoad, ShortScpiElectronicLoad
 from src.instruments.power_supply import PSU_PROFILES, PowerSupply, TDKLambdaZPlus
 
 
@@ -274,6 +274,62 @@ class TestElectronicLoadCommunication:
         load, res = _make_connected(ElectronicLoad)
         load.input_off()
         res.write.assert_called_with("INPut OFF")
+
+
+# ======================================================================
+# SS — ShortScpiElectronicLoad profile
+# ======================================================================
+
+class TestShortScpiLoad:
+
+    def test_measure_voltage_command(self):
+        load, res = _make_connected(ShortScpiElectronicLoad)
+        res.query.return_value = "11.980"
+        v = load.measure_voltage()
+        res.query.assert_called_with("MEAS:VOLT?")
+        assert abs(v - 11.98) < 1e-6
+
+    def test_measure_current_command(self):
+        load, res = _make_connected(ShortScpiElectronicLoad)
+        res.query.return_value = "2.290"
+        i = load.measure_current()
+        res.query.assert_called_with("MEAS:CURR?")
+        assert abs(i - 2.29) < 1e-6
+
+    def test_set_mode_command(self):
+        load, res = _make_connected(ShortScpiElectronicLoad)
+        load.set_mode("CC")
+        res.write.assert_called_with("FUNC CC")
+
+    def test_input_on_command(self):
+        load, res = _make_connected(ShortScpiElectronicLoad)
+        load.input_on()
+        res.write.assert_called_with("INP ON")
+
+    def test_input_off_command(self):
+        load, res = _make_connected(ShortScpiElectronicLoad)
+        load.input_off()
+        res.write.assert_called_with("INP OFF")
+
+    def test_commands_differ_from_standard_scpi(self):
+        assert ShortScpiElectronicLoad.CMD_MEASURE_VOLTAGE != ElectronicLoad.CMD_MEASURE_VOLTAGE
+        assert ShortScpiElectronicLoad.CMD_MEASURE_CURRENT != ElectronicLoad.CMD_MEASURE_CURRENT
+        assert ShortScpiElectronicLoad.CMD_SET_MODE != ElectronicLoad.CMD_SET_MODE
+
+
+# ======================================================================
+# LR — Load profile registry
+# ======================================================================
+
+class TestLoadProfileRegistry:
+
+    def test_load_profile_registry_contains_all_profiles(self):
+        assert "standard_scpi" in LOAD_PROFILES
+        assert "short_scpi" in LOAD_PROFILES
+        assert LOAD_PROFILES["standard_scpi"] is ElectronicLoad
+        assert LOAD_PROFILES["short_scpi"] is ShortScpiElectronicLoad
+        for key, cls in LOAD_PROFILES.items():
+            assert issubclass(cls, ElectronicLoad), f"Profile '{key}' must subclass ElectronicLoad"
 
 
 # ======================================================================

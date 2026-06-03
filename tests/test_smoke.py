@@ -108,6 +108,79 @@ def main_window(qtbot, smoke_settings):
 
 
 # ---------------------------------------------------------------------------
+# Load-specific serial settings
+# ---------------------------------------------------------------------------
+
+
+def test_load_serial_settings_default_independently():
+    """Load serial fields exist and have independent defaults."""
+    from src.config.settings_manager import SettingsManager
+    s = SettingsManager()
+    assert hasattr(s, "load_serial_baud_rate")
+    assert hasattr(s, "load_serial_write_termination")
+    assert hasattr(s, "load_serial_read_termination")
+    assert hasattr(s, "load_visa_timeout_ms")
+    assert hasattr(s, "load_connect_preamble")
+    assert hasattr(s, "load_command_profile")
+
+
+def test_load_serial_settings_can_differ_from_psu(tmp_path, monkeypatch):
+    """Load baud rate can be set independently of PSU baud rate."""
+    import src.config.settings_manager as sm
+    from src.config.settings_manager import SettingsManager
+    monkeypatch.setattr(sm, "CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.setattr(sm, "LOGS_DIR", tmp_path / "logs")
+    s = SettingsManager()
+    s.serial_baud_rate = 9600
+    s.load_serial_baud_rate = 115200
+    s.save()
+    s2 = SettingsManager()
+    s2.load()
+    assert s2.serial_baud_rate == 9600
+    assert s2.load_serial_baud_rate == 115200
+
+
+def test_backward_compat_old_config_populates_load_settings(tmp_path, monkeypatch):
+    """An old config without load-specific serial keys falls back to PSU values."""
+    import json
+    import src.config.settings_manager as sm
+    from src.config.settings_manager import SettingsManager
+    monkeypatch.setattr(sm, "CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.setattr(sm, "LOGS_DIR", tmp_path / "logs")
+    (tmp_path / "logs").mkdir()
+    # Write an old-style config with only the shared keys
+    old_cfg = {
+        "psu_visa_strings": [""],
+        "load_visa_strings": [""],
+        "no_load_mode": False,
+        "poll_rate_hz": 1.0,
+        "teams_webhook_url": "",
+        "log_directory": str(tmp_path / "logs"),
+        "control_psu_output": False,
+        "control_load_input": False,
+        "last_load_mode": "CC",
+        "graph_window_seconds": 60,
+        "limits": {},
+        "serial_baud_rate": 19200,
+        "serial_write_termination": "\r\n",
+        "serial_read_termination": "\r\n",
+        "visa_timeout_ms": 3000,
+        "psu_connect_preamble": "",
+        "load_connect_preamble": "",
+        "psu_command_profile": "standard_scpi",
+        "load_command_profile": "standard_scpi",
+    }
+    (tmp_path / "config.json").write_text(json.dumps(old_cfg), encoding="utf-8")
+    s = SettingsManager()
+    s.load()
+    # Load settings should fall back to shared PSU values
+    assert s.load_serial_baud_rate == 19200
+    assert s.load_serial_write_termination == "\r\n"
+    assert s.load_serial_read_termination == "\r\n"
+    assert s.load_visa_timeout_ms == 3000
+
+
+# ---------------------------------------------------------------------------
 # SC-10 — Config persistence
 # ---------------------------------------------------------------------------
 

@@ -91,6 +91,13 @@ class PsuPanel(QGroupBox):
         self._current_spin.setDecimals(3)
         self._current_spin.setSingleStep(0.01)
         self._current_spin.setEnabled(False)
+        self._current_spin.setToolTip(
+            "Sets the current limit on the PSU.\n"
+            "In CV mode (constant voltage) the measured current shown below\n"
+            "is what your load actually draws — it will only equal this\n"
+            "setpoint if the load demands that much current.\n"
+            "Set this below the load's draw to enter CC mode."
+        )
 
         # Apply button — sends V + I to the instrument in one shot
         self._apply_btn = QPushButton("Apply Setpoints")

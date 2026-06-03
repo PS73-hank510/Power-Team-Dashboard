@@ -115,8 +115,8 @@ class SettingsDialog(QDialog):
         teams_form.addRow("Webhook URL:", self._webhook_field)
         teams_group.setLayout(teams_form)
 
-        # ── Serial Port / VISA ─────────────────────────────────────
-        serial_group = QGroupBox("Serial Port / VISA Session")
+        # ── PSU — Serial Port / VISA ───────────────────────────────
+        serial_group = QGroupBox("PSU — Serial Port / VISA Session")
 
         self._baud_combo = QComboBox()
         for baud in _BAUD_RATES:
@@ -168,6 +168,40 @@ class SettingsDialog(QDialog):
         )
         serial_group.setLayout(serial_form)
 
+        # ── Load — Serial Port / VISA ──────────────────────────────
+        load_serial_group = QGroupBox("Load — Serial Port / VISA Session")
+
+        self._load_baud_combo = QComboBox()
+        for baud in _BAUD_RATES:
+            self._load_baud_combo.addItem(str(baud), baud)
+
+        self._load_write_term_combo = QComboBox()
+        for label, val in _TERMINATIONS:
+            self._load_write_term_combo.addItem(label, val)
+
+        self._load_read_term_combo = QComboBox()
+        for label, val in _TERMINATIONS:
+            self._load_read_term_combo.addItem(label, val)
+
+        self._load_timeout_spin = QSpinBox()
+        self._load_timeout_spin.setRange(100, 60_000)
+        self._load_timeout_spin.setSingleStep(500)
+        self._load_timeout_spin.setSuffix(" ms")
+
+        load_serial_form = QFormLayout()
+        load_serial_form.addRow("Baud rate:", self._load_baud_combo)
+        load_serial_form.addRow("Write termination:", self._load_write_term_combo)
+        load_serial_form.addRow("Read termination:", self._load_read_term_combo)
+        load_serial_form.addRow("VISA timeout:", self._load_timeout_spin)
+        load_serial_form.addRow(
+            "",
+            QLabel(
+                "<small>These settings apply only to the Load instrument "
+                "and are independent from the PSU settings above.</small>"
+            ),
+        )
+        load_serial_group.setLayout(load_serial_form)
+
         # ── Buttons ────────────────────────────────────────────────
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -181,6 +215,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(log_group)
         layout.addWidget(teams_group)
         layout.addWidget(serial_group)
+        layout.addWidget(load_serial_group)
         layout.addWidget(buttons)
         self.setLayout(layout)
 
@@ -231,6 +266,30 @@ class SettingsDialog(QDialog):
         self._psu_preamble_field.setText(self._settings.psu_connect_preamble)
         self._load_preamble_field.setText(self._settings.load_connect_preamble)
 
+        # Load-specific serial / VISA settings
+        load_baud_idx = next(
+            (i for i, b in enumerate(_BAUD_RATES)
+             if b == self._settings.load_serial_baud_rate),
+            _BAUD_RATES.index(9600),
+        )
+        self._load_baud_combo.setCurrentIndex(load_baud_idx)
+
+        load_write_idx = next(
+            (i for i, (_, v) in enumerate(_TERMINATIONS)
+             if v == self._settings.load_serial_write_termination),
+            0,
+        )
+        self._load_write_term_combo.setCurrentIndex(load_write_idx)
+
+        load_read_idx = next(
+            (i for i, (_, v) in enumerate(_TERMINATIONS)
+             if v == self._settings.load_serial_read_termination),
+            0,
+        )
+        self._load_read_term_combo.setCurrentIndex(load_read_idx)
+
+        self._load_timeout_spin.setValue(self._settings.load_visa_timeout_ms)
+
         load_profile_idx = next(
             (i for i, k in enumerate(LOAD_PROFILE_LABELS)
              if k == self._settings.load_command_profile),
@@ -267,13 +326,19 @@ class SettingsDialog(QDialog):
         self._settings.log_directory = self._log_dir_field.text()
         self._settings.teams_webhook_url = url
 
-        # Serial / VISA
+        # PSU serial / VISA
         self._settings.serial_baud_rate = self._baud_combo.currentData()
         self._settings.serial_write_termination = self._write_term_combo.currentData()
         self._settings.serial_read_termination = self._read_term_combo.currentData()
         self._settings.visa_timeout_ms = self._timeout_spin.value()
         self._settings.psu_connect_preamble = self._psu_preamble_field.text().strip()
         self._settings.load_connect_preamble = self._load_preamble_field.text().strip()
+
+        # Load-specific serial / VISA
+        self._settings.load_serial_baud_rate = self._load_baud_combo.currentData()
+        self._settings.load_serial_write_termination = self._load_write_term_combo.currentData()
+        self._settings.load_serial_read_termination = self._load_read_term_combo.currentData()
+        self._settings.load_visa_timeout_ms = self._load_timeout_spin.value()
 
         self._settings.save()
         self.accept()
