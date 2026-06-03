@@ -220,6 +220,9 @@ class MainWindow(QMainWindow):
             panel.setpoint_changed.connect(
                 lambda v, c, idx=i: self._on_psu_setpoint_changed(idx, v, c)
             )
+            panel.output_requested.connect(
+                lambda on, idx=i: self._on_psu_output_requested(idx, on)
+            )
             self._instrument_panels_layout.insertWidget(stretch_idx + i, panel)
             self._psu_panels.append(panel)
 
@@ -395,6 +398,30 @@ class MainWindow(QMainWindow):
                 psu.set_current(current)
             except CommunicationError as exc:
                 self._alerts_log.append_entry(f"[PSU-{idx}] Setpoint error: {exc}")
+
+    def _on_psu_output_requested(self, idx: int, on: bool) -> None:
+        """Turn the indexed PSU output on or off."""
+        if self._controller.state not in (
+            TestState.CONNECTED, TestState.STOPPED, TestState.RUNNING
+        ):
+            return
+        if idx < len(self._controller._psus):
+            try:
+                psu = self._controller._psus[idx]
+                if on:
+                    psu.output_on()
+                else:
+                    psu.output_off()
+                # Sync button state to confirmed instrument state
+                if idx < len(self._psu_panels):
+                    self._psu_panels[idx].set_output_state(on)
+            except CommunicationError as exc:
+                # Roll back button to previous state on failure
+                if idx < len(self._psu_panels):
+                    self._psu_panels[idx].set_output_state(not on)
+                self._alerts_log.append_entry(
+                    f"[PSU-{idx}] Output {'ON' if on else 'OFF'} failed: {exc}"
+                )
 
     def _on_telemetry_ready(self, sample: TelemetrySample) -> None:
         """Route telemetry to graph and live reading displays."""
