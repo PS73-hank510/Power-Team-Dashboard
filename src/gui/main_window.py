@@ -36,7 +36,7 @@ from src.gui.limits_panel import LimitsPanel
 from src.gui.load_panel import LoadPanel
 from src.gui.psu_panel import PsuPanel
 from src.gui.settings_dialog import SettingsDialog
-from src.instruments.electronic_load import ElectronicLoad
+from src.instruments.electronic_load import LOAD_PROFILES, ElectronicLoad
 from src.instruments.power_supply import PSU_PROFILES, PowerSupply
 from src.instruments.base import CommunicationError
 
@@ -270,12 +270,13 @@ class MainWindow(QMainWindow):
         write_term = self._settings.serial_write_termination
         read_term = self._settings.serial_read_termination
         timeout_ms = self._settings.visa_timeout_ms
-        preamble = self._settings.connect_preamble
 
-        # PSU class chosen by the command-profile setting
-        PSUClass = PSU_PROFILES.get(
-            self._settings.psu_command_profile, PowerSupply
-        )
+        # Per-instrument preambles and profiles
+        psu_preamble = self._settings.psu_connect_preamble
+        load_preamble = self._settings.load_connect_preamble
+
+        PSUClass = PSU_PROFILES.get(self._settings.psu_command_profile, PowerSupply)
+        LoadClass = LOAD_PROFILES.get(self._settings.load_command_profile, ElectronicLoad)
 
         # Connect all PSUs
         psus: list[PowerSupply] = []
@@ -286,7 +287,7 @@ class MainWindow(QMainWindow):
                 write_termination=write_term,
                 read_termination=read_term,
                 timeout_ms=timeout_ms,
-                connect_preamble=preamble,
+                connect_preamble=psu_preamble,
             )
             try:
                 psu.connect()
@@ -305,13 +306,13 @@ class MainWindow(QMainWindow):
         # Connect all loads (may be empty for PSU-only)
         loads: list[ElectronicLoad] = []
         for visa in load_visas:
-            load = ElectronicLoad(
+            load = LoadClass(
                 visa,
                 baud_rate=baud,
                 write_termination=write_term,
                 read_termination=read_term,
                 timeout_ms=timeout_ms,
-                connect_preamble=preamble,
+                connect_preamble=load_preamble,
             )
             try:
                 load.connect()
@@ -406,9 +407,17 @@ class MainWindow(QMainWindow):
         # ── Voltage ──────────────────────────────────────────────────
         try:
             psu.set_voltage(voltage)
-            self._alerts_log.append_entry(
-                f"[{tag}] Voltage setpoint applied: {voltage:.3f} V"
-            )
+            # Read back to confirm the instrument stored the value
+            try:
+                confirmed_v = psu.get_voltage_setpoint()
+                self._alerts_log.append_entry(
+                    f"[{tag}] Voltage setpoint → {voltage:.3f} V "
+                    f"(instrument confirmed: {confirmed_v:.3f} V)"
+                )
+            except Exception:
+                self._alerts_log.append_entry(
+                    f"[{tag}] Voltage setpoint sent: {voltage:.3f} V"
+                )
         except CommunicationError as exc:
             self._alerts_log.append_entry(
                 f"[{tag}] Voltage setpoint FAILED: {exc}"
@@ -417,9 +426,22 @@ class MainWindow(QMainWindow):
         # ── Current ──────────────────────────────────────────────────
         try:
             psu.set_current(current)
-            self._alerts_log.append_entry(
-                f"[{tag}] Current setpoint applied: {current:.3f} A"
-            )
+            # Read back to confirm the instrument stored the value.
+            # NOTE: the measured current shown in the dashboard is what your
+            # load actually draws — it will NOT equal the setpoint unless the
+            # supply is in CC mode and the load exceeds this limit.
+            try:
+                confirmed_i = psu.get_current_setpoint()
+                self._alerts_log.append_entry(
+                    f"[{tag}] Current setpoint → {current:.3f} A "
+                    f"(instrument confirmed: {confirmed_i:.3f} A). "
+                    "Measured current = actual load draw, not this limit."
+                )
+            except Exception:
+                self._alerts_log.append_entry(
+                    f"[{tag}] Current setpoint sent: {current:.3f} A "
+                    "(measured current = actual load draw, not this limit)"
+                )
         except CommunicationError as exc:
             self._alerts_log.append_entry(
                 f"[{tag}] Current setpoint FAILED: {exc}"

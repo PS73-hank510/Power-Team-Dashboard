@@ -20,7 +20,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from src.config.settings_manager import POLL_RATE_OPTIONS, PSU_PROFILE_LABELS, SettingsManager
+from src.config.settings_manager import (
+    LOAD_PROFILE_LABELS,
+    POLL_RATE_OPTIONS,
+    PSU_PROFILE_LABELS,
+    SettingsManager,
+)
 
 # Baud-rate options (most common RS-232 speeds)
 _BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
@@ -66,18 +71,23 @@ class SettingsDialog(QDialog):
         for key, label in PSU_PROFILE_LABELS.items():
             self._psu_profile_combo.addItem(label, key)
 
+        self._load_profile_combo = QComboBox()
+        for key, label in LOAD_PROFILE_LABELS.items():
+            self._load_profile_combo.addItem(label, key)
+
         self._psu_output_cb = QCheckBox("Control PSU output on Start/Stop")
         self._load_input_cb = QCheckBox("Control Load input on Start/Stop")
 
         instr_form = QFormLayout()
         instr_form.addRow("PSU command profile:", self._psu_profile_combo)
+        instr_form.addRow("Load command profile:", self._load_profile_combo)
 
         instr_layout = QVBoxLayout()
         instr_layout.addLayout(instr_form)
         instr_layout.addWidget(self._psu_output_cb)
         instr_layout.addWidget(self._load_input_cb)
         instr_layout.addWidget(QLabel(
-            "<small>Select the command set that matches your power supply. "
+            "<small>Select the command set that matches each instrument. "
             "Takes effect on the next Connect.<br>"
             "When <i>Control PSU/Load output</i> is enabled, the dashboard sends "
             "ON/OFF commands automatically on test start and stop.</small>"))
@@ -125,9 +135,14 @@ class SettingsDialog(QDialog):
         self._timeout_spin.setSingleStep(500)
         self._timeout_spin.setSuffix(" ms")
 
-        self._preamble_field = QLineEdit()
-        self._preamble_field.setPlaceholderText(
+        self._psu_preamble_field = QLineEdit()
+        self._psu_preamble_field.setPlaceholderText(
             "e.g. ADR 10  (TDK-Lambda GEN/GENESYS RS-232 address)"
+        )
+
+        self._load_preamble_field = QLineEdit()
+        self._load_preamble_field.setPlaceholderText(
+            "e.g. ADDR 1  (leave blank for most loads)"
         )
 
         serial_form = QFormLayout()
@@ -135,7 +150,8 @@ class SettingsDialog(QDialog):
         serial_form.addRow("Write termination:", self._write_term_combo)
         serial_form.addRow("Read termination:", self._read_term_combo)
         serial_form.addRow("VISA timeout:", self._timeout_spin)
-        serial_form.addRow("Connection preamble:", self._preamble_field)
+        serial_form.addRow("PSU connection preamble:", self._psu_preamble_field)
+        serial_form.addRow("Load connection preamble:", self._load_preamble_field)
         serial_form.addRow(
             "",
             QLabel(
@@ -143,10 +159,11 @@ class SettingsDialog(QDialog):
                 "instruments (ASRL). USB-TMC, GPIB, and LAN instruments ignore "
                 "the baud rate. Increase the timeout if your instrument is slow "
                 "to respond.<br>"
-                "<b>Connection preamble</b>: sent once immediately after the port "
-                "opens, before any SCPI query — required by TDK-Lambda GEN/GENESYS "
-                "and other instruments that need an address handshake "
-                "(e.g. <i>ADR 10</i>). Leave blank for standard instruments.</small>"
+                "<b>Connection preambles</b>: each is sent once immediately after "
+                "the respective port opens, before any SCPI query — required by "
+                "TDK-Lambda GEN/GENESYS and other instruments that need an address "
+                "handshake (e.g. <i>ADR 10</i>). Leave blank for standard "
+                "instruments. PSU and Load preambles are independent.</small>"
             ),
         )
         serial_group.setLayout(serial_form)
@@ -211,7 +228,15 @@ class SettingsDialog(QDialog):
         self._read_term_combo.setCurrentIndex(read_idx)
 
         self._timeout_spin.setValue(self._settings.visa_timeout_ms)
-        self._preamble_field.setText(self._settings.connect_preamble)
+        self._psu_preamble_field.setText(self._settings.psu_connect_preamble)
+        self._load_preamble_field.setText(self._settings.load_connect_preamble)
+
+        load_profile_idx = next(
+            (i for i, k in enumerate(LOAD_PROFILE_LABELS)
+             if k == self._settings.load_command_profile),
+            0,
+        )
+        self._load_profile_combo.setCurrentIndex(load_profile_idx)
 
     def _browse_log_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -236,6 +261,7 @@ class SettingsDialog(QDialog):
 
         self._settings.poll_rate_hz = self._poll_combo.currentData()
         self._settings.psu_command_profile = self._psu_profile_combo.currentData()
+        self._settings.load_command_profile = self._load_profile_combo.currentData()
         self._settings.control_psu_output = self._psu_output_cb.isChecked()
         self._settings.control_load_input = self._load_input_cb.isChecked()
         self._settings.log_directory = self._log_dir_field.text()
@@ -246,7 +272,8 @@ class SettingsDialog(QDialog):
         self._settings.serial_write_termination = self._write_term_combo.currentData()
         self._settings.serial_read_termination = self._read_term_combo.currentData()
         self._settings.visa_timeout_ms = self._timeout_spin.value()
-        self._settings.connect_preamble = self._preamble_field.text().strip()
+        self._settings.psu_connect_preamble = self._psu_preamble_field.text().strip()
+        self._settings.load_connect_preamble = self._load_preamble_field.text().strip()
 
         self._settings.save()
         self.accept()

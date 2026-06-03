@@ -19,6 +19,15 @@ from src.instruments.base import BaseInstrument, CommunicationError
 LOAD_MODES = ("CC", "CV", "CR", "CP")
 
 
+# ---------------------------------------------------------------------------
+# Profile registry  —  key must match SettingsManager.load_command_profile
+# ---------------------------------------------------------------------------
+# To add a new profile:
+#   1. Subclass ElectronicLoad and override the CMD_* attributes you need.
+#   2. Add an entry here.
+#   3. Add a human-readable label to LOAD_PROFILE_LABELS in settings_manager.py.
+
+
 class ElectronicLoad(BaseInstrument):
     """SCPI-compliant programmable electronic load driver.
 
@@ -161,3 +170,8 @@ class ElectronicLoad(BaseInstrument):
         Raises CommunicationError on VISA failure.
         """
         self._write(self.CMD_INPUT_OFF)
+
+
+LOAD_PROFILES: dict[str, type[ElectronicLoad]] = {
+    "standard_scpi": ElectronicLoad,
+}
