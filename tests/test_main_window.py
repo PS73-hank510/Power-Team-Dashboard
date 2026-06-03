@@ -90,11 +90,17 @@ def test_state_change_dispatched_to_connection_panel(main_window):
 
 
 def test_all_inputs_disabled_when_running(qtbot, main_window):
-    """When state is RUNNING, setpoint and mode inputs are disabled."""
+    """When state is RUNNING:
+    - PSU setpoint spinboxes and Apply button stay ENABLED (live adjustment allowed).
+    - Load mode combo and limits apply button are DISABLED.
+    """
     main_window._create_instrument_panels(1, 1)
     main_window._apply_state(TestState.RUNNING)
-    assert not main_window._psu_panels[0]._voltage_spin.isEnabled()
-    assert not main_window._psu_panels[0]._current_spin.isEnabled()
+    # PSU setpoints remain editable so users can nudge voltage/current mid-test
+    assert main_window._psu_panels[0]._voltage_spin.isEnabled()
+    assert main_window._psu_panels[0]._current_spin.isEnabled()
+    assert main_window._psu_panels[0]._apply_btn.isEnabled()
+    # Load and limits still locked during a run
     assert not main_window._load_panels[0]._mode_combo.isEnabled()
     assert not main_window._limits_panel._apply_button.isEnabled()
 

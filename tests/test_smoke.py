@@ -487,15 +487,23 @@ def test_sc6_close_blocked_when_running(qtbot, main_window):
 
 
 def test_sc5_inputs_locked_during_run(qtbot, main_window):
-    """All parameter input widgets are disabled when state is RUNNING."""
+    """SC-5: Critical controls lock during RUNNING; PSU setpoints stay live.
+
+    PSU voltage/current spinboxes and Apply button remain ENABLED so the
+    operator can adjust setpoints mid-test without stopping the run.
+    All other sensitive controls (load mode, limits, connect) are locked.
+    """
     main_window._create_instrument_panels(1, 1)
     main_window._apply_state(TestState.RUNNING)
 
     psu_panel = main_window._psu_panels[0]
     load_panel = main_window._load_panels[0]
 
-    assert not psu_panel._voltage_spin.isEnabled(), "PSU voltage spin should be disabled"
-    assert not psu_panel._current_spin.isEnabled(), "PSU current spin should be disabled"
+    # PSU setpoints intentionally stay editable during a run
+    assert psu_panel._voltage_spin.isEnabled(), "PSU voltage spin should be enabled during run"
+    assert psu_panel._current_spin.isEnabled(), "PSU current spin should be enabled during run"
+    assert psu_panel._apply_btn.isEnabled(), "PSU Apply button should be enabled during run"
+    # Everything else locked
     assert not load_panel._mode_combo.isEnabled(), "Load mode combo should be disabled"
     assert not main_window._limits_panel._apply_button.isEnabled(), "Apply Limits button should be disabled"
     assert not main_window._connection_panel._connect_button.isEnabled(), "Connect button should be disabled"

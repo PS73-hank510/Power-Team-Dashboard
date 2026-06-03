@@ -384,7 +384,9 @@ class MainWindow(QMainWindow):
         self, idx: int, voltage: float, current: float
     ) -> None:
         """Send setpoint changes to the indexed PSU (if connected)."""
-        if self._controller.state not in (TestState.CONNECTED, TestState.STOPPED):
+        if self._controller.state not in (
+            TestState.CONNECTED, TestState.STOPPED, TestState.RUNNING
+        ):
             return
         if idx < len(self._controller._psus):
             try:
