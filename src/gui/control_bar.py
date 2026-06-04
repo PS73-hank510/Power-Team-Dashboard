@@ -7,8 +7,17 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from src.core.models import TestState
 
-_START_STYLE = "QPushButton { background-color: #28a745; color: white; font-weight: bold; font-size: 14px; padding: 8px 24px; border-radius: 4px; } QPushButton:hover { background-color: #218838; }"
-_STOP_STYLE = "QPushButton { background-color: #dc3545; color: white; font-weight: bold; font-size: 14px; padding: 8px 24px; border-radius: 4px; } QPushButton:hover { background-color: #c82333; }"
+_START_STYLE = (
+    "QPushButton { background-color: #28a745; color: white; font-weight: bold;"
+    " font-size: 15px; padding: 10px 32px; border-radius: 6px; }"
+    "QPushButton:hover { background-color: #218838; }"
+    "QPushButton:disabled { background-color: #aaa; color: #eee; }"
+)
+_STOP_STYLE = (
+    "QPushButton { background-color: #dc3545; color: white; font-weight: bold;"
+    " font-size: 15px; padding: 10px 32px; border-radius: 6px; }"
+    "QPushButton:hover { background-color: #c82333; }"
+)
 
 
 class ControlBar(QWidget):
@@ -30,16 +39,17 @@ class ControlBar(QWidget):
         self._button.setMinimumWidth(180)
         self._button.clicked.connect(self._on_button_clicked)
 
-        self._status_label = QLabel("Status: DISCONNECTED")
-        self._status_label.setStyleSheet("font-size: 12px; color: #6c757d;")
+        self._status_label = QLabel("⬤  DISCONNECTED")
+        self._status_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #6c757d;")
 
         self._is_running = False
 
+        # Status on the left, Start/Stop button anchored to the right
         layout = QHBoxLayout()
-        layout.addWidget(self._button)
-        layout.addStretch()
         layout.addWidget(self._status_label)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addStretch()
+        layout.addWidget(self._button)
+        layout.setContentsMargins(8, 4, 8, 4)
         self.setLayout(layout)
 
     def apply_state(self, state: TestState) -> None:
@@ -49,29 +59,37 @@ class ControlBar(QWidget):
             self._button.setText("⏹  STOP TEST")
             self._button.setStyleSheet(_STOP_STYLE)
             self._button.setEnabled(True)
-            self._status_label.setText("Status: RUNNING")
-            self._status_label.setStyleSheet("font-size: 12px; color: #28a745; font-weight: bold;")
+            self._status_label.setText("⬤  RUNNING")
+            self._status_label.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #28a745;"
+            )
         elif state == TestState.CONNECTED:
             self._is_running = False
             self._button.setText("▶  START TEST")
             self._button.setStyleSheet(_START_STYLE)
             self._button.setEnabled(True)
-            self._status_label.setText("Status: CONNECTED")
-            self._status_label.setStyleSheet("font-size: 12px; color: #17a2b8;")
+            self._status_label.setText("⬤  CONNECTED")
+            self._status_label.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #17a2b8;"
+            )
         elif state == TestState.STOPPED:
             self._is_running = False
             self._button.setText("▶  START TEST")
             self._button.setStyleSheet(_START_STYLE)
             self._button.setEnabled(True)
-            self._status_label.setText("Status: STOPPED")
-            self._status_label.setStyleSheet("font-size: 12px; color: #6c757d;")
+            self._status_label.setText("⬤  STOPPED")
+            self._status_label.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #e07800;"
+            )
         elif state == TestState.DISCONNECTED:
             self._is_running = False
             self._button.setText("▶  START TEST")
             self._button.setStyleSheet(_START_STYLE)
             self._button.setEnabled(False)
-            self._status_label.setText("Status: DISCONNECTED")
-            self._status_label.setStyleSheet("font-size: 12px; color: #6c757d;")
+            self._status_label.setText("⬤  DISCONNECTED")
+            self._status_label.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #6c757d;"
+            )
 
     def _on_button_clicked(self) -> None:
         if self._is_running:

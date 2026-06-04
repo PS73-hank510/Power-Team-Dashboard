@@ -113,31 +113,25 @@ class TeamsNotifier:
 
     @staticmethod
     def _build_payload(message: str, color: str) -> dict:
-        """Build the Adaptive Card JSON payload for the Teams Workflow webhook."""
-        return {
-            "type": "message",
-            "attachments": [
-                {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.4",
-                        "body": [
-                            {
-                                "type": "TextBlock",
-                                "text": "⚡ Power Systems Dashboard",
-                                "weight": "Bolder",
-                                "size": "Medium",
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": message,
-                                "wrap": True,
-                                "color": color,
-                            },
-                        ],
-                    },
-                }
-            ],
-        }
+        """Build a plain-text JSON payload for the Teams Workflow webhook.
+
+        Uses ``{"text": "..."}`` so the full alert is visible in Windows
+        notification previews without opening Teams.
+
+        Power Automate flow configuration required
+        ------------------------------------------
+        Your flow must forward this field to Teams.  If you set it up with
+        the default "Post to a channel when a webhook request is received"
+        template, open the flow in Power Automate, find the
+        "Post message in a chat or channel" action, and set the **Message**
+        field to::
+
+            @{triggerBody()?['text']}
+
+        This replaces any Adaptive Card expression that was there previously.
+        Save and test — you should see the plain-text message appear directly
+        in the Teams channel and in Windows notification toasts.
+        """
+        prefix = "🔴" if color == "Attention" else "🟢" if color == "Good" else "🟡"
+        body = f"⚡ **Power Systems Dashboard**\n{prefix} {message}"
+        return {"text": body}

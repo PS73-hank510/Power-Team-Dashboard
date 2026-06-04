@@ -72,6 +72,12 @@ _DEFAULTS: dict[str, Any] = {
     "load_serial_write_termination": "\n",
     "load_serial_read_termination": "\n",
     "load_visa_timeout_ms": 5000,
+    # Optional command sent once after the Load connects to enable remote control.
+    # Examples: "SYST:REM", "REMOTE", "SYSTEM:REMOTE". Leave blank if not needed.
+    "load_remote_enable_command": "",
+    # Which Prodigit channel(s) to control: "ch1", "ch2", or "both".
+    # Ignored for non-Prodigit profiles.
+    "load_channel_mode": "ch1",
 }
 
 # Human-readable labels for the PSU profile dropdown (key → display string)
@@ -82,8 +88,11 @@ PSU_PROFILE_LABELS: dict[str, str] = {
 
 # Human-readable labels for the Load profile dropdown (key → display string)
 LOAD_PROFILE_LABELS: dict[str, str] = {
-    "standard_scpi": "Standard SCPI  (BK Precision, Chroma, Rigol, …)",
-    "short_scpi": "Short SCPI  (abbreviated MEAS:VOLT?, FUNC, INP ON/OFF)",
+    "standard_scpi":       "Standard SCPI  (BK Precision, Chroma, Rigol, …)",
+    "short_scpi":          "Short SCPI  (abbreviated MEAS:VOLT?, FUNC, INP ON/OFF)",
+    "prodigit_3330f_ch1":  "Prodigit 3330F  (CHAN1/2 select-then-command protocol)",
+    "prodigit_3330f_ch2":  "Prodigit 3330F — Channel 2 only  (legacy; prefer ch1 + channel selector)",
+    "prodigit_3330f_both": "Prodigit 3330F — Both Channels  (CH1 + CH2 lock-step)",
 }
 
 # Valid poll rate options (Hz)
@@ -149,6 +158,9 @@ class SettingsManager:
         self.load_serial_write_termination: str = _DEFAULTS["load_serial_write_termination"]
         self.load_serial_read_termination: str = _DEFAULTS["load_serial_read_termination"]
         self.load_visa_timeout_ms: int = _DEFAULTS["load_visa_timeout_ms"]
+        self.load_remote_enable_command: str = _DEFAULTS["load_remote_enable_command"]
+        # Prodigit channel mode: "ch1", "ch2", or "both"
+        self.load_channel_mode: str = _DEFAULTS["load_channel_mode"]
 
     # ------------------------------------------------------------------
     # Public API
@@ -224,6 +236,12 @@ class SettingsManager:
 
         self.psu_command_profile = raw.get("psu_command_profile", _DEFAULTS["psu_command_profile"])
         self.load_command_profile = raw.get("load_command_profile", _DEFAULTS["load_command_profile"])
+        self.load_remote_enable_command = raw.get(
+            "load_remote_enable_command", _DEFAULTS["load_remote_enable_command"]
+        )
+        self.load_channel_mode = raw.get(
+            "load_channel_mode", _DEFAULTS["load_channel_mode"]
+        )
 
         raw_limits: dict = raw.get("limits", {})
         self.limits = {
@@ -257,6 +275,8 @@ class SettingsManager:
             "load_connect_preamble": self.load_connect_preamble,
             "psu_command_profile": self.psu_command_profile,
             "load_command_profile": self.load_command_profile,
+            "load_remote_enable_command": self.load_remote_enable_command,
+            "load_channel_mode": self.load_channel_mode,
             "load_serial_baud_rate": self.load_serial_baud_rate,
             "load_serial_write_termination": self.load_serial_write_termination,
             "load_serial_read_termination": self.load_serial_read_termination,
@@ -311,6 +331,8 @@ class SettingsManager:
         self.load_connect_preamble = _DEFAULTS["load_connect_preamble"]
         self.psu_command_profile = _DEFAULTS["psu_command_profile"]
         self.load_command_profile = _DEFAULTS["load_command_profile"]
+        self.load_remote_enable_command = _DEFAULTS["load_remote_enable_command"]
+        self.load_channel_mode = _DEFAULTS["load_channel_mode"]
         self.load_serial_baud_rate = _DEFAULTS["load_serial_baud_rate"]
         self.load_serial_write_termination = _DEFAULTS["load_serial_write_termination"]
         self.load_serial_read_termination = _DEFAULTS["load_serial_read_termination"]

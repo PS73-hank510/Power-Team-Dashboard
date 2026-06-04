@@ -102,6 +102,7 @@ def test_all_inputs_disabled_when_running(qtbot, main_window):
     assert main_window._psu_panels[0]._apply_btn.isEnabled()
     # Load and limits still locked during a run
     assert not main_window._load_panels[0]._mode_combo.isEnabled()
+    assert not main_window._load_panels[0]._apply_btn.isEnabled()
     assert not main_window._limits_panel._apply_button.isEnabled()
 
 
@@ -112,6 +113,7 @@ def test_all_inputs_re_enabled_after_stop(qtbot, main_window):
     main_window._apply_state(TestState.STOPPED)
     assert main_window._psu_panels[0]._voltage_spin.isEnabled()
     assert main_window._load_panels[0]._mode_combo.isEnabled()
+    assert main_window._load_panels[0]._apply_btn.isEnabled()
 
 
 def test_event_log_receives_messages(main_window):

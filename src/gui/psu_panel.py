@@ -83,6 +83,7 @@ class PsuPanel(QGroupBox):
         self._voltage_spin.setSuffix(" V")
         self._voltage_spin.setDecimals(3)
         self._voltage_spin.setSingleStep(0.1)
+        self._voltage_spin.setMinimumWidth(140)
         self._voltage_spin.setEnabled(False)
 
         self._current_spin = QDoubleSpinBox()
@@ -90,6 +91,7 @@ class PsuPanel(QGroupBox):
         self._current_spin.setSuffix(" A")
         self._current_spin.setDecimals(3)
         self._current_spin.setSingleStep(0.01)
+        self._current_spin.setMinimumWidth(140)
         self._current_spin.setEnabled(False)
         self._current_spin.setToolTip(
             "Sets the current limit on the PSU.\n"
@@ -102,46 +104,52 @@ class PsuPanel(QGroupBox):
         # Apply button — sends V + I to the instrument in one shot
         self._apply_btn = QPushButton("Apply Setpoints")
         self._apply_btn.setToolTip(
-            "Send the voltage and current limit to the power supply now."
+            "Send the voltage and current setpoints to the power supply now."
         )
         self._apply_btn.setEnabled(False)
+        self._apply_btn.setMinimumHeight(32)
         self._apply_btn.clicked.connect(self._on_apply_clicked)
 
         # Output toggle button
         self._output_btn = QPushButton()
         self._output_btn.setToolTip("Toggle the PSU output on or off.")
         self._output_btn.setEnabled(False)
-        self._output_btn.setMinimumWidth(130)
+        self._output_btn.setMinimumWidth(140)
+        self._output_btn.setMinimumHeight(32)
         self._output_btn.clicked.connect(self._on_output_clicked)
         self._refresh_output_btn()  # set initial label + style
 
         # ── Live measurement labels ──────────────────────────────────
-        self._v_label = QLabel("--- V")
-        self._i_label = QLabel("--- A")
-        self._p_label = QLabel("--- W")
+        self._v_label = QLabel("---  V")
+        self._i_label = QLabel("---  A")
+        self._p_label = QLabel("---  W")
         for lbl in (self._v_label, self._i_label, self._p_label):
             lbl.setStyleSheet(
-                "font-family: monospace; font-size: 13px; font-weight: bold;"
+                "font-family: monospace; font-size: 14px; font-weight: bold;"
             )
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         # ── Layout ───────────────────────────────────────────────────
         form = QFormLayout()
+        form.setVerticalSpacing(8)
+        form.setHorizontalSpacing(12)
         form.addRow("Voltage Setpoint:", self._voltage_spin)
         form.addRow("Current Setpoint:", self._current_spin)
 
-        form.addRow("─" * 20, QLabel(""))
+        form.addRow("─" * 24, QLabel(""))
         form.addRow("Measured Voltage:", self._v_label)
         form.addRow("Measured Current:", self._i_label)
         form.addRow("Measured Power:", self._p_label)
 
-        # Buttons side by side at the bottom
+        # Buttons side by side below the form
         btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        btn_row.setSpacing(8)
         btn_row.addWidget(self._output_btn)
-        btn_row.addWidget(self._apply_btn)
+        btn_row.addWidget(self._apply_btn, 1)
 
         layout = QVBoxLayout()
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.addLayout(form)
         layout.addLayout(btn_row)
         self.setLayout(layout)

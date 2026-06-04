@@ -41,6 +41,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PyQt6.QtCore import Qt
 
 from src.core.models import LimitPair, TelemetrySample, TestState
 
@@ -520,16 +521,15 @@ def test_sc8_comm_error_stays_running(qtbot, controller, mock_psu, mock_load):
 
 
 def test_sc11_load_mode_control(qtbot, main_window, mock_psu, mock_load):
-    """Changing load mode in a CONNECTED state calls set_mode and set_value
-    on the instrument with the correct arguments."""
+    """Clicking Apply Load Settings calls set_mode and set_value on the instrument."""
     # Inject mock instruments directly — bypass the real VISA connect path
     main_window._controller._psus = [mock_psu]
     main_window._controller._loads = [mock_load]
     main_window._controller._state = TestState.CONNECTED
     main_window._create_instrument_panels(1, 1)
 
-    # Simulate the load panel emitting mode_changed for "CV" at 5.0 V
-    main_window._on_load_mode_changed(0, "CV", 5.0)
+    # Simulate the user clicking Apply with mode "CV" at 5.0 V
+    main_window._on_load_settings_applied(0, "CV", 5.0)
 
     mock_load.set_mode.assert_called_once_with("CV")
     mock_load.set_value.assert_called_once_with("CV", 5.0)
@@ -578,6 +578,7 @@ def test_sc5_inputs_locked_during_run(qtbot, main_window):
     assert psu_panel._apply_btn.isEnabled(), "PSU Apply button should be enabled during run"
     # Everything else locked
     assert not load_panel._mode_combo.isEnabled(), "Load mode combo should be disabled"
+    assert not load_panel._apply_btn.isEnabled(), "Load Apply button should be disabled during run"
     assert not main_window._limits_panel._apply_button.isEnabled(), "Apply Limits button should be disabled"
     assert not main_window._connection_panel._connect_button.isEnabled(), "Connect button should be disabled"
 
@@ -594,6 +595,7 @@ def test_sc7_inputs_re_enabled_after_stop(qtbot, main_window):
     assert psu_panel._voltage_spin.isEnabled(), "PSU voltage spin should be re-enabled"
     assert psu_panel._current_spin.isEnabled(), "PSU current spin should be re-enabled"
     assert load_panel._mode_combo.isEnabled(), "Load mode combo should be re-enabled"
+    assert load_panel._apply_btn.isEnabled(), "Load Apply button should be re-enabled after stop"
     assert main_window._limits_panel._apply_button.isEnabled(), "Apply Limits should be re-enabled"
 
 
@@ -603,8 +605,8 @@ def test_sc7_inputs_re_enabled_after_stop(qtbot, main_window):
 
 
 def test_sc15_scan_populates_dropdown(qtbot, main_window):
-    """Clicking 'Scan for Instruments' populates the combo box with VISA resources
-    returned by rm.list_resources()."""
+    """Clicking 'Scan Ports' makes discovered USB-TMC/GPIB resources available
+    in the per-row address combos after the scan completes."""
     fake_resources = (
         "USB0::0x0957::0x2C07::MY12345::INSTR",
         "GPIB0::22::INSTR",
@@ -612,20 +614,29 @@ def test_sc15_scan_populates_dropdown(qtbot, main_window):
 
     conn = main_window._connection_panel
 
-    with patch("pyvisa.ResourceManager") as MockRM:
+    with (
+        patch("pyvisa.ResourceManager") as MockRM,
+        patch("src.gui.connection_panel._detect_com_ports", return_value=[]),
+        patch("src.gui.connection_panel.QMessageBox.information"),
+    ):
         rm_inst = MagicMock()
         rm_inst.list_resources.return_value = fake_resources
         MockRM.return_value = rm_inst
 
+        # _scan_instruments normally calls self._scan_button.setText / setEnabled;
+        # the button exists so no AttributeError is expected here.
         conn._scan_instruments()
 
-    items = [conn._scan_combo.itemText(i) for i in range(conn._scan_combo.count())]
-    assert "USB0::0x0957::0x2C07::MY12345::INSTR" in items, (
-        f"Expected PSU VISA string in scan results. Got: {items}"
-    )
-    assert "GPIB0::22::INSTR" in items, (
-        f"Expected GPIB resource in scan results. Got: {items}"
-    )
+    # After scan the discovered resources should appear as UserRole data in every
+    # row combo (merged into extra_visas and pushed to each combo via refresh()).
+    for _, _, combo in conn._psu_rows + conn._load_rows:
+        visa_data = [combo.itemData(i) for i in range(combo.count())]
+        assert "USB0::0x0957::0x2C07::MY12345::INSTR" in visa_data, (
+            f"USB resource not found in combo data: {visa_data}"
+        )
+        assert "GPIB0::22::INSTR" in visa_data, (
+            f"GPIB resource not found in combo data: {visa_data}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -789,3 +800,158 @@ def test_psu_only_mode_no_load_panels(qtbot, main_window):
     assert all(s.source == "PSU" for s in received), (
         "PSU-only mode should not emit any LOAD telemetry"
     )
+
+
+# ---------------------------------------------------------------------------
+# Load Apply workflow
+# ---------------------------------------------------------------------------
+
+
+def test_load_panel_dirty_on_creation(qtbot, main_window):
+    """A freshly created LoadPanel starts in dirty (not applied) state."""
+    main_window._create_instrument_panels(1, 1)
+    assert main_window._load_panels[0].is_dirty
+
+
+def test_load_panel_no_signal_on_mode_change(qtbot, main_window):
+    """Changing the mode dropdown does NOT emit settings_applied."""
+    main_window._create_instrument_panels(1, 1)
+    panel = main_window._load_panels[0]
+    emitted = []
+    panel.settings_applied.connect(lambda m, v: emitted.append((m, v)))
+
+    panel._mode_combo.setCurrentText("CV")
+    assert emitted == [], "settings_applied must not fire on mere mode change"
+
+
+def test_load_panel_no_signal_on_value_change(qtbot, main_window):
+    """Changing the value spinbox does NOT emit settings_applied."""
+    main_window._create_instrument_panels(1, 1)
+    panel = main_window._load_panels[0]
+    emitted = []
+    panel.settings_applied.connect(lambda m, v: emitted.append((m, v)))
+
+    panel._value_spin.setValue(2.5)
+    assert emitted == [], "settings_applied must not fire on mere value change"
+
+
+def test_load_panel_apply_btn_emits_signal(qtbot, main_window):
+    """Clicking Apply emits settings_applied with the current mode and value."""
+    main_window._create_instrument_panels(1, 1)
+    panel = main_window._load_panels[0]
+    emitted = []
+    panel.settings_applied.connect(lambda m, v: emitted.append((m, v)))
+
+    panel._mode_combo.setCurrentText("CC")
+    panel._value_spin.setValue(3.0)
+    qtbot.mouseClick(panel._apply_btn, Qt.MouseButton.LeftButton)
+
+    assert len(emitted) == 1
+    assert emitted[0][0] == "CC"
+    assert abs(emitted[0][1] - 3.0) < 1e-6
+
+
+def test_load_panel_mark_applied_clears_dirty(qtbot, main_window):
+    """mark_applied() clears the dirty flag and updates the status label."""
+    main_window._create_instrument_panels(1, 1)
+    panel = main_window._load_panels[0]
+    assert panel.is_dirty  # starts dirty
+
+    panel.mark_applied("CC", 1.5)
+
+    assert not panel.is_dirty
+    assert "Applied" in panel._status_label.text()
+    assert "CC" in panel._status_label.text()
+
+
+def test_load_panel_mode_change_marks_dirty_again(qtbot, main_window):
+    """Changing mode after a successful apply marks the panel dirty again."""
+    main_window._create_instrument_panels(1, 1)
+    panel = main_window._load_panels[0]
+    panel.mark_applied("CC", 1.0)
+    assert not panel.is_dirty
+
+    panel._mode_combo.setCurrentText("CV")
+    assert panel.is_dirty
+
+
+def test_start_blocked_when_load_settings_dirty(qtbot, main_window, mock_psu, mock_load):
+    """Start Test is blocked (with a warning) when a load panel has unapplied settings."""
+    main_window._controller._psus = [mock_psu]
+    main_window._controller._loads = [mock_load]
+    main_window._controller._state = TestState.CONNECTED
+    main_window._create_instrument_panels(1, 1)
+
+    # Panel starts dirty — test must be blocked
+    with patch("PyQt6.QtWidgets.QMessageBox.warning") as mock_warn:
+        main_window._on_start_requested()
+        mock_warn.assert_called_once()
+
+    # Controller must NOT have transitioned to RUNNING
+    assert main_window._controller.state == TestState.CONNECTED
+
+
+def test_start_allowed_after_load_applied(qtbot, main_window, mock_psu, mock_load):
+    """Start Test proceeds once the load panel has been successfully applied."""
+    main_window._controller._psus = [mock_psu]
+    main_window._controller._loads = [mock_load]
+    main_window._controller._state = TestState.CONNECTED
+    main_window._create_instrument_panels(1, 1)
+
+    # Apply settings so the panel is no longer dirty
+    main_window._load_panels[0].mark_applied("CC", 1.0)
+    assert not main_window._load_panels[0].is_dirty
+
+    # start_test will be called; mock it so we don't need a real logger/poller
+    with patch.object(main_window._controller, "start_test") as mock_start:
+        main_window._on_start_requested()
+        mock_start.assert_called_once()
+
+
+def test_start_allowed_with_no_loads(qtbot, main_window, mock_psu):
+    """In PSU-only mode (no load panels), Start Test is not blocked."""
+    main_window._controller._psus = [mock_psu]
+    main_window._controller._loads = []
+    main_window._controller._state = TestState.CONNECTED
+    main_window._create_instrument_panels(1, 0)
+
+    with patch.object(main_window._controller, "start_test") as mock_start:
+        main_window._on_start_requested()
+        mock_start.assert_called_once()
+
+
+def test_load_apply_sends_mode_and_value_to_instrument(qtbot, main_window, mock_psu, mock_load):
+    """_on_load_settings_applied sends correct mode and value to the instrument."""
+    main_window._controller._psus = [mock_psu]
+    main_window._controller._loads = [mock_load]
+    main_window._controller._state = TestState.CONNECTED
+    main_window._create_instrument_panels(1, 1)
+
+    main_window._on_load_settings_applied(0, "CR", 100.0)
+
+    mock_load.set_mode.assert_called_once_with("CR")
+    mock_load.set_value.assert_called_once_with("CR", 100.0)
+    assert not main_window._load_panels[0].is_dirty
+
+
+def test_load_apply_failure_leaves_panel_dirty(qtbot, main_window, mock_psu, mock_load):
+    """If set_mode fails, the panel stays dirty (command did not reach instrument)."""
+    from src.instruments.base import CommunicationError
+    mock_load.set_mode.side_effect = CommunicationError("timeout")
+
+    main_window._controller._psus = [mock_psu]
+    main_window._controller._loads = [mock_load]
+    main_window._controller._state = TestState.CONNECTED
+    main_window._create_instrument_panels(1, 1)
+
+    main_window._on_load_settings_applied(0, "CC", 1.0)
+
+    assert main_window._load_panels[0].is_dirty
+
+
+def test_load_remote_enable_setting_exists():
+    """SettingsManager has a load_remote_enable_command field with empty default."""
+    from src.config.settings_manager import SettingsManager
+    s = SettingsManager()
+    assert hasattr(s, "load_remote_enable_command")
+    assert s.load_remote_enable_command == ""

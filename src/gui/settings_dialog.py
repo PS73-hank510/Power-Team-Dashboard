@@ -16,8 +16,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QComboBox,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from src.config.settings_manager import (
@@ -140,30 +142,19 @@ class SettingsDialog(QDialog):
             "e.g. ADR 10  (TDK-Lambda GEN/GENESYS RS-232 address)"
         )
 
-        self._load_preamble_field = QLineEdit()
-        self._load_preamble_field.setPlaceholderText(
-            "e.g. ADDR 1  (leave blank for most loads)"
-        )
-
         serial_form = QFormLayout()
         serial_form.addRow("Baud rate:", self._baud_combo)
         serial_form.addRow("Write termination:", self._write_term_combo)
         serial_form.addRow("Read termination:", self._read_term_combo)
         serial_form.addRow("VISA timeout:", self._timeout_spin)
-        serial_form.addRow("PSU connection preamble:", self._psu_preamble_field)
-        serial_form.addRow("Load connection preamble:", self._load_preamble_field)
+        serial_form.addRow("Connection preamble:", self._psu_preamble_field)
         serial_form.addRow(
             "",
             QLabel(
-                "<small>Baud rate and termination apply to RS-232 / COM-port "
-                "instruments (ASRL). USB-TMC, GPIB, and LAN instruments ignore "
-                "the baud rate. Increase the timeout if your instrument is slow "
-                "to respond.<br>"
-                "<b>Connection preambles</b>: each is sent once immediately after "
-                "the respective port opens, before any SCPI query — required by "
-                "TDK-Lambda GEN/GENESYS and other instruments that need an address "
-                "handshake (e.g. <i>ADR 10</i>). Leave blank for standard "
-                "instruments. PSU and Load preambles are independent.</small>"
+                "<small>Baud rate, termination, and timeout apply to the PSU only. "
+                "Preamble is sent once after the port opens (e.g. <i>ADR 10</i> "
+                "for TDK-Lambda GEN/GENESYS). Leave blank for standard instruments."
+                "</small>"
             ),
         )
         serial_group.setLayout(serial_form)
@@ -188,35 +179,60 @@ class SettingsDialog(QDialog):
         self._load_timeout_spin.setSingleStep(500)
         self._load_timeout_spin.setSuffix(" ms")
 
+        self._load_preamble_field = QLineEdit()
+        self._load_preamble_field.setPlaceholderText(
+            "e.g. ADDR 1  (leave blank for most loads)"
+        )
+
+        self._load_remote_cmd_field = QLineEdit()
+        self._load_remote_cmd_field.setPlaceholderText(
+            "e.g. SYST:REM  or  REMOTE  (leave blank if not needed)"
+        )
+
         load_serial_form = QFormLayout()
         load_serial_form.addRow("Baud rate:", self._load_baud_combo)
         load_serial_form.addRow("Write termination:", self._load_write_term_combo)
         load_serial_form.addRow("Read termination:", self._load_read_term_combo)
         load_serial_form.addRow("VISA timeout:", self._load_timeout_spin)
+        load_serial_form.addRow("Connection preamble:", self._load_preamble_field)
+        load_serial_form.addRow("Remote enable command:", self._load_remote_cmd_field)
         load_serial_form.addRow(
             "",
             QLabel(
                 "<small>These settings apply only to the Load instrument "
-                "and are independent from the PSU settings above.</small>"
+                "and are fully independent from the PSU settings above.</small>"
             ),
         )
         load_serial_group.setLayout(load_serial_form)
 
-        # ── Buttons ────────────────────────────────────────────────
+        # ── Buttons (pinned outside scroll area) ───────────────────
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_ok)
         buttons.rejected.connect(self.reject)
 
+        # ── Scrollable content ─────────────────────────────────────
+        # All groups go into a widget inside a QScrollArea so the dialog
+        # remains usable on small/low-resolution screens.
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addWidget(poll_group)
+        content_layout.addWidget(instr_group)
+        content_layout.addWidget(log_group)
+        content_layout.addWidget(teams_group)
+        content_layout.addWidget(serial_group)
+        content_layout.addWidget(load_serial_group)
+
+        scroll = QScrollArea()
+        scroll.setWidget(content_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
         layout = QVBoxLayout()
-        layout.addWidget(poll_group)
-        layout.addWidget(instr_group)
-        layout.addWidget(log_group)
-        layout.addWidget(teams_group)
-        layout.addWidget(serial_group)
-        layout.addWidget(load_serial_group)
-        layout.addWidget(buttons)
+        layout.addWidget(scroll, 1)   # scroll takes all available vertical space
+        layout.addWidget(buttons)     # buttons always visible at the bottom
         self.setLayout(layout)
 
     def _load_values(self) -> None:
@@ -289,6 +305,7 @@ class SettingsDialog(QDialog):
         self._load_read_term_combo.setCurrentIndex(load_read_idx)
 
         self._load_timeout_spin.setValue(self._settings.load_visa_timeout_ms)
+        self._load_remote_cmd_field.setText(self._settings.load_remote_enable_command)
 
         load_profile_idx = next(
             (i for i, k in enumerate(LOAD_PROFILE_LABELS)
@@ -339,6 +356,7 @@ class SettingsDialog(QDialog):
         self._settings.load_serial_write_termination = self._load_write_term_combo.currentData()
         self._settings.load_serial_read_termination = self._load_read_term_combo.currentData()
         self._settings.load_visa_timeout_ms = self._load_timeout_spin.value()
+        self._settings.load_remote_enable_command = self._load_remote_cmd_field.text().strip()
 
         self._settings.save()
         self.accept()

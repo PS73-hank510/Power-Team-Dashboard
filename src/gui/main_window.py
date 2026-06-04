@@ -36,9 +36,131 @@ from src.gui.limits_panel import LimitsPanel
 from src.gui.load_panel import LoadPanel
 from src.gui.psu_panel import PsuPanel
 from src.gui.settings_dialog import SettingsDialog
-from src.instruments.electronic_load import LOAD_PROFILES, ElectronicLoad
+from src.instruments.electronic_load import (
+    LOAD_PROFILES,
+    ElectronicLoad,
+    ProdigitBothChannelsLoad,
+    ProdigitCh1Load,
+    ProdigitCh2Load,
+    ProdigitDualChannelLoad,
+)
 from src.instruments.power_supply import PSU_PROFILES, PowerSupply
 from src.instruments.base import CommunicationError
+
+
+# ---------------------------------------------------------------------------
+# Operating Manual — HTML content for Help → Operating Manual
+# ---------------------------------------------------------------------------
+
+_OPERATING_MANUAL_HTML = """
+<h2>Power Systems Monitoring Dashboard — Operating Manual</h2>
+
+<h3>Overview</h3>
+<p>The dashboard connects to SCPI-compliant power supplies (PSUs) and electronic
+loads via VISA (USB-TMC, GPIB, LAN) or serial (RS-232 / USB-CDC) interfaces.
+It provides real-time telemetry, limit monitoring, Teams alerts, and direct
+instrument control.</p>
+
+<h3>Connecting Instruments</h3>
+<ol>
+  <li>Enter the VISA resource strings in the Connection panel
+      (e.g. <code>ASRL3::INSTR</code> for COM3, <code>USB0::0x0ABC::0x0001::INSTR</code>
+      for USB-TMC).</li>
+  <li>Open <b>Settings</b> and configure serial baud rate, termination, profile,
+      and (for Prodigit loads) the channel selector.</li>
+  <li>Click <b>Connect</b>.</li>
+</ol>
+
+<h3>Power Supply Control</h3>
+<ul>
+  <li>Enter voltage and current setpoints in the PSU panel and click
+      <b>Apply Setpoints</b>.  Setpoints are sent immediately.</li>
+  <li>Use <b>Output ON / OFF</b> to enable or disable the PSU output.</li>
+  <li>The measured voltage, current, and power update at the configured poll rate.</li>
+</ul>
+
+<h3>Electronic Load — General (Standard SCPI / Short SCPI profiles)</h3>
+<ol>
+  <li>Select mode (CC / CV / CR / CP) and set value in the Load panel.</li>
+  <li>Click <b>Apply Load Settings</b> to send the mode and value to the instrument.</li>
+  <li>Use the load&rsquo;s front panel or the <b>Load ON / OFF</b> buttons to enable
+      the load input.</li>
+</ol>
+
+<h3>Electronic Load — Prodigit 3302G / 3330F</h3>
+<p>The Prodigit uses a <em>select-then-command</em> protocol: a channel-select
+command (<code>CHAN1</code> or <code>CHAN2</code>) is always sent first,
+followed by bare commands with no per-command prefix.</p>
+
+<h4>Protocol sequence</h4>
+<pre>
+CHAN1          (select channel 1)
+LOAD OFF       (disable input — safety before mode change)
+CC 0.0         (reset current setpoint to 0)
+MODE CC        (set operating mode)
+CC 5.0         (set setpoint; format: &lt;MODE&gt; &lt;value&gt;)
+LOAD ON        (enable input)
+VOLT?          (measure terminal voltage)
+CURR?          (measure load current)
+</pre>
+
+<h4>Recommended operating sequence</h4>
+<ol>
+  <li><b>Select channel</b> in the Load panel (CH1 / CH2 / Both).
+      Reconnect if you change the channel selection.</li>
+  <li><b>Apply Load Settings</b> — sends LOAD OFF → CC 0 → MODE → setpoint.</li>
+  <li><b>Load ON</b> — enables the load input.</li>
+  <li>To change mode: click <b>Load OFF</b>, change mode/value,
+      click <b>Apply</b>, then <b>Load ON</b> again.</li>
+  <li>Click <b>Load OFF</b> before disconnecting.</li>
+</ol>
+
+<h4>Safety notes</h4>
+<ul>
+  <li>Always send <b>Load OFF</b> before changing the operating mode.
+      The driver does this automatically on Apply, but manual OFF first is safer.</li>
+  <li><b>CP mode</b> may not engage if a residual current setpoint is left from
+      a previous mode. Cycling LOAD OFF → Apply → Load ON resolves this.</li>
+  <li>The <b>Both CH1+CH2</b> mode locks both channels to the same setpoint.
+      It sleeps ≈ 700 ms per mode change (hardware firmware requirement).</li>
+  <li><b>Numeric MODE? response</b>: the 3330F sometimes returns
+      <code>0</code>=CC, <code>1</code>=CR, <code>2</code>=CV, <code>3</code>=CP.
+      The driver normalises these automatically.</li>
+</ul>
+
+<h4>Typical baud rate</h4>
+<p>COM3 or COM4 at <b>115200 baud</b>, write/read termination <code>\\r\\n</code>.</p>
+
+<h3>Running a Test</h3>
+<ol>
+  <li>Connect instruments and apply load settings.</li>
+  <li>Optionally configure limits in the Limits panel.</li>
+  <li>Click <b>Start Test</b>.  The test runs at the configured poll rate.</li>
+  <li>Click <b>Stop Test</b> to end.  The dashboard remains connected.</li>
+</ol>
+<p><b>Note:</b> Start Test is blocked until all connected load panels show
+<em>&ldquo;Applied&rdquo;</em> status.  Click <b>Apply Load Settings</b>
+on each load panel first.</p>
+
+<h3>Limit Monitoring</h3>
+<p>Set min/max limits for any measured parameter in the Limits panel.
+When a limit is violated, an alert is logged and a Teams notification is sent
+(if a webhook URL is configured in Settings).</p>
+
+<h3>Settings Reference</h3>
+<table border="1" cellpadding="4" cellspacing="0">
+  <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>PSU Profile</td><td>SCPI command set for the power supply</td></tr>
+  <tr><td>Load Profile</td><td>SCPI command set for the electronic load</td></tr>
+  <tr><td>Load Channel</td><td>CH1 / CH2 / Both — Prodigit only; reconnect to apply</td></tr>
+  <tr><td>Baud Rate</td><td>Serial baud rate (e.g. 9600, 115200)</td></tr>
+  <tr><td>Write / Read Termination</td><td>Line ending sent/expected (LF, CR+LF, CR)</td></tr>
+  <tr><td>VISA Timeout</td><td>Query timeout in milliseconds</td></tr>
+  <tr><td>Connect Preamble</td><td>Command sent once on connect (e.g. ADR 10 for TDK-Lambda)</td></tr>
+  <tr><td>Remote Enable</td><td>Command to put instrument in remote mode (e.g. SYST:REM)</td></tr>
+  <tr><td>Poll Rate</td><td>Measurement frequency (0.5 – 10 Hz)</td></tr>
+</table>
+"""
 
 
 class MainWindow(QMainWindow):
@@ -105,52 +227,61 @@ class MainWindow(QMainWindow):
         self._alerts_log = AlertsLogWidget()
 
     def _build_layout(self) -> None:
-        # ── Left column ───────────────────────────────────────────────
-        left_widget = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(4)
+        # ── Top bar — status + Start/Stop (spans full window width) ──
+        # The ControlBar has: [status label] [stretch] [START/STOP button]
+        self._control_bar.setStyleSheet(
+            "QWidget { background-color: #1e1e2e; border-bottom: 1px solid #333; }"
+        )
+        self._control_bar.setFixedHeight(52)
 
-        # Connection panel (always visible)
-        left_layout.addWidget(self._connection_panel)
-
-        # Scrollable area for dynamic instrument panels
+        # ── Left column: Connection panel + scrollable instrument panels ──
+        # Connection panel is always visible at the top.
+        # PSU and Load panels are added/removed dynamically below it.
         self._instrument_panels_widget = QWidget()
         self._instrument_panels_layout = QVBoxLayout()
         self._instrument_panels_layout.setContentsMargins(0, 0, 0, 0)
-        self._instrument_panels_layout.setSpacing(4)
-        self._instrument_panels_layout.addStretch()  # pushes panels to the top
+        self._instrument_panels_layout.setSpacing(6)
+        self._instrument_panels_layout.addStretch()  # panels pinned to top
         self._instrument_panels_widget.setLayout(self._instrument_panels_layout)
 
         instr_scroll = QScrollArea()
         instr_scroll.setWidget(self._instrument_panels_widget)
         instr_scroll.setWidgetResizable(True)
-        instr_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        left_layout.addWidget(instr_scroll, 1)
+        instr_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # Fixed panels at the bottom of the left column
-        left_layout.addWidget(self._limits_panel)
-        left_layout.addWidget(self._control_bar)
-
+        left_widget = QWidget()
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(4)
+        left_layout.setContentsMargins(4, 4, 4, 4)
+        left_layout.addWidget(self._connection_panel)
+        left_layout.addWidget(instr_scroll, 1)   # PSU + Load panels fill remaining height
         left_widget.setLayout(left_layout)
 
-        # ── Right column ──────────────────────────────────────────────
+        # ── Right column: Limits bar (top) + Graph + Alerts ──────────
+        # Safety-limits bar is a compact horizontal strip at the very top.
+        # The graph and alerts log share the remaining space below it.
         right_widget = QWidget()
         right_layout = QVBoxLayout()
-        right_layout.addWidget(self._graph_panel, 3)
-        right_layout.addWidget(self._alerts_log, 1)
+        right_layout.setContentsMargins(4, 4, 4, 4)
+        right_layout.setSpacing(6)
+        right_layout.addWidget(self._limits_panel)      # compact horizontal limits
+        right_layout.addWidget(self._graph_panel, 3)    # graph gets most of the space
+        right_layout.addWidget(self._alerts_log, 1)     # alerts log below graph
         right_widget.setLayout(right_layout)
 
-        # ── Splitter ──────────────────────────────────────────────────
+        # ── 2-pane horizontal splitter ────────────────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(left_widget)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([400, 800])
+        splitter.addWidget(left_widget)    # Connection + instrument panels
+        splitter.addWidget(right_widget)   # Limits + Graph + Alerts
+        splitter.setSizes([420, 780])
 
+        # ── Central widget: top bar + splitter ────────────────────────
         central = QWidget()
         main_layout = QVBoxLayout()
-        main_layout.addWidget(splitter)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(self._control_bar)   # full-width top bar
+        main_layout.addWidget(splitter, 1)
         central.setLayout(main_layout)
         self.setCentralWidget(central)
 
@@ -162,6 +293,8 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self._open_settings)
 
         help_menu = menu_bar.addMenu("Help")
+        manual_action = help_menu.addAction("Operating Manual…")
+        manual_action.triggered.connect(self._show_operating_manual)
         teams_action = help_menu.addAction("Teams Webhook Setup…")
         teams_action.triggered.connect(self._show_teams_help)
         about_action = help_menu.addAction("About")
@@ -209,7 +342,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _create_instrument_panels(self, num_psus: int, num_loads: int) -> None:
-        """Create PSU and Load display panels after a successful connection."""
+        """Create PSU and Load display panels after a successful connection.
+
+        Panels are stacked vertically in the left scrollable area:
+        PSU panels first, then Load panels.  All panels are inserted before
+        the trailing stretch so they stay pinned to the top.
+        """
         self._clear_instrument_panels()
 
         # Insert before the trailing stretch (last item in the layout)
@@ -228,8 +366,14 @@ class MainWindow(QMainWindow):
 
         for j in range(num_loads):
             panel = LoadPanel(self._settings, index=j)
-            panel.mode_changed.connect(
-                lambda m, v, idx=j: self._on_load_mode_changed(idx, m, v)
+            panel.settings_applied.connect(
+                lambda m, v, idx=j: self._on_load_settings_applied(idx, m, v)
+            )
+            panel.input_requested.connect(
+                lambda on, idx=j: self._on_load_input_requested(idx, on)
+            )
+            panel.status_requested.connect(
+                lambda idx=j: self._on_load_status_requested(idx)
             )
             self._instrument_panels_layout.insertWidget(
                 stretch_idx + num_psus + j, panel
@@ -284,6 +428,19 @@ class MainWindow(QMainWindow):
         PSUClass = PSU_PROFILES.get(self._settings.psu_command_profile, PowerSupply)
         LoadClass = LOAD_PROFILES.get(self._settings.load_command_profile, ElectronicLoad)
 
+        # For Prodigit profiles, the channel-mode setting (ch1/ch2/both) overrides
+        # whichever specific ch1/ch2 variant was stored in load_command_profile.
+        # This lets the user change channels via the LoadPanel dropdown without
+        # editing the profile key manually.
+        if issubclass(LoadClass, ProdigitDualChannelLoad):
+            channel_mode = self._settings.load_channel_mode
+            if channel_mode == "ch2":
+                LoadClass = ProdigitCh2Load
+            elif channel_mode == "both":
+                LoadClass = ProdigitBothChannelsLoad
+            else:  # "ch1" or any unrecognised value → default to CH1
+                LoadClass = ProdigitCh1Load
+
         # Connect all PSUs
         psus: list[PowerSupply] = []
         for visa in psu_visas:
@@ -319,6 +476,7 @@ class MainWindow(QMainWindow):
                 read_termination=load_read_term,
                 timeout_ms=load_timeout_ms,
                 connect_preamble=load_preamble,
+                remote_enable_command=self._settings.load_remote_enable_command,
             )
             try:
                 load.connect()
@@ -363,6 +521,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Cannot Disconnect", str(exc))
 
     def _on_start_requested(self) -> None:
+        # Guard: all connected load panels must have settings applied before starting
+        for i, panel in enumerate(self._load_panels):
+            if panel.is_dirty:
+                QMessageBox.warning(
+                    self,
+                    "Load Settings Not Applied",
+                    f"Load {i + 1} settings have not been sent to the instrument.\n\n"
+                    "Click \"Apply Load Settings\" on the load panel before starting the test.",
+                )
+                return
         try:
             self._controller.start_test()
         except Exception as exc:
@@ -378,17 +546,120 @@ class MainWindow(QMainWindow):
         self._controller.update_limits(limits)
         self._graph_panel.update_limits(limits)
 
-    def _on_load_mode_changed(self, idx: int, mode: str, value: float) -> None:
-        """Send mode + value to the indexed load instrument (if connected)."""
+    def _on_load_settings_applied(self, idx: int, mode: str, value: float) -> None:
+        """Send mode and value to the indexed load instrument.
+
+        Called when the user clicks "Apply Load Settings" on a LoadPanel.
+        On success the panel dirty flag is cleared.  On failure a message
+        is logged and the panel stays dirty so the user knows the command
+        did not reach the instrument.
+        """
         if self._controller.state not in (TestState.CONNECTED, TestState.STOPPED):
             return
-        if idx < len(self._controller._loads):
-            try:
-                load = self._controller._loads[idx]
-                load.set_mode(mode)
-                load.set_value(mode, value)
-            except CommunicationError as exc:
-                self._alerts_log.append_entry(f"[Load-{idx}] Mode set error: {exc}")
+        if idx >= len(self._controller._loads):
+            return
+
+        load = self._controller._loads[idx]
+        tag = f"Load-{idx}"
+
+        # ── Mode ──────────────────────────────────────────────────────
+        try:
+            load.set_mode(mode)
+        except CommunicationError as exc:
+            self._alerts_log.append_entry(
+                f"[{tag}] Mode set FAILED ({mode}): {exc}"
+            )
+            return  # Leave panel dirty — settings did not reach instrument
+
+        # ── Value ─────────────────────────────────────────────────────
+        try:
+            load.set_value(mode, value)
+        except CommunicationError as exc:
+            self._alerts_log.append_entry(
+                f"[{tag}] Value set FAILED ({mode} {value:.3g}): {exc}"
+            )
+            return
+
+        # ── Optional verification (best-effort; silenced on failure) ──
+        try:
+            confirmed_mode = load.get_mode()
+            self._alerts_log.append_entry(
+                f"[{tag}] Settings applied: {mode} @ {value:.3g} "
+                f"(instrument confirmed mode: {confirmed_mode})"
+            )
+        except Exception:
+            self._alerts_log.append_entry(
+                f"[{tag}] Settings applied: {mode} @ {value:.3g}"
+            )
+
+        # ── Mark panel as applied ─────────────────────────────────────
+        if idx < len(self._load_panels):
+            self._load_panels[idx].mark_applied(mode, value)
+
+    def _on_load_input_requested(self, idx: int, on: bool) -> None:
+        """Turn the indexed load input on (on=True) or off (on=False).
+
+        Called when the user clicks Load ON or Load OFF on a LoadPanel.
+        The panel's button highlight is updated to reflect the new state.
+        On failure the alert log records the error and the highlight is not changed.
+        """
+        if self._controller.state not in (
+            TestState.CONNECTED, TestState.STOPPED, TestState.RUNNING
+        ):
+            return
+        if idx >= len(self._controller._loads):
+            return
+
+        load = self._controller._loads[idx]
+        tag  = f"Load-{idx}"
+        try:
+            if on:
+                load.input_on()
+                self._alerts_log.append_entry(f"[{tag}] Load input ON")
+            else:
+                load.input_off()
+                self._alerts_log.append_entry(f"[{tag}] Load input OFF")
+            if idx < len(self._load_panels):
+                self._load_panels[idx].set_input_state(on)
+        except CommunicationError as exc:
+            self._alerts_log.append_entry(
+                f"[{tag}] Load {'ON' if on else 'OFF'} failed: {exc}"
+            )
+
+    def _on_load_status_requested(self, idx: int) -> None:
+        """Query mode and load state from the indexed load instrument.
+
+        Results are displayed in the LoadPanel status field and logged to
+        the alerts log.  Best-effort — individual query failures are silenced
+        so a partial response is still shown.
+        """
+        if self._controller.state not in (
+            TestState.CONNECTED, TestState.STOPPED, TestState.RUNNING
+        ):
+            return
+        if idx >= len(self._controller._loads):
+            return
+
+        load = self._controller._loads[idx]
+        tag  = f"Load-{idx}"
+        parts: list[str] = []
+
+        # Load input state (Prodigit-specific; silenced for other profiles)
+        if hasattr(load, "query_load_state"):
+            state = load.query_load_state()
+            parts.append(f"Input: {state or 'N/A'}")
+
+        # Current mode
+        try:
+            mode = load.get_mode()
+            parts.append(f"Mode: {mode}")
+        except CommunicationError:
+            parts.append("Mode: (query failed)")
+
+        status_text = "  |  ".join(parts) if parts else "No status available"
+        self._alerts_log.append_entry(f"[{tag}] Status — {status_text}")
+        if idx < len(self._load_panels):
+            self._load_panels[idx].set_status_text(status_text)
 
     def _on_psu_setpoint_changed(
         self, idx: int, voltage: float, current: float
@@ -501,7 +772,18 @@ class MainWindow(QMainWindow):
     def _update_load_display(self, sample: TelemetrySample, idx: int) -> None:
         cache = self._load_caches.setdefault(idx, {"voltage": 0.0, "current": 0.0})
         cache[sample.parameter] = sample.value
-        self._load_panels[idx].update_readings(cache["voltage"], cache["current"])
+        panel = self._load_panels[idx]
+        panel.update_readings(cache["voltage"], cache["current"])
+
+        # For Both-channel loads, forward the cached CH2 readings to the panel
+        # so the GUI reflects the last measurement from ProdigitBothChannelsLoad.
+        if idx < len(self._controller._loads):
+            load = self._controller._loads[idx]
+            if isinstance(load, ProdigitBothChannelsLoad):
+                panel.update_ch2_readings(
+                    load.measure_voltage_ch2(),
+                    load.measure_current_ch2(),
+                )
 
     # ------------------------------------------------------------------
     # Menu actions
@@ -512,6 +794,26 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self._controller.update_poll_rate(self._settings.poll_rate_hz)
             self._controller.update_notifier_url(self._settings.teams_webhook_url)
+
+    def _show_operating_manual(self) -> None:
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QScrollArea, QTextBrowser
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Operating Manual — Power Systems Dashboard")
+        dlg.setMinimumSize(700, 560)
+
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        browser.setHtml(_OPERATING_MANUAL_HTML)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dlg.accept)
+
+        layout = QVBoxLayout()
+        layout.addWidget(browser, 1)
+        layout.addWidget(buttons)
+        dlg.setLayout(layout)
+        dlg.exec()
 
     def _show_teams_help(self) -> None:
         QMessageBox.information(

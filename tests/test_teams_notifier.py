@@ -11,50 +11,50 @@ from src.notifications.teams_notifier import TeamsNotifier
 
 
 # ------------------------------------------------------------------
-# Payload shape
+# Payload shape  (plain-text {"text": "..."} format)
 # ------------------------------------------------------------------
 
-def test_payload_has_correct_top_level_type():
+def test_payload_has_text_key():
+    """Payload must use the plain-text 'text' field, not Adaptive Cards."""
     notifier = TeamsNotifier("https://example.com/webhook")
     payload = notifier._build_payload("Test message", "Attention")
-    assert payload["type"] == "message"
+    assert "text" in payload
+    assert isinstance(payload["text"], str)
 
 
-def test_payload_has_attachments():
+def test_payload_has_no_attachments():
+    """Plain-text format must NOT include an Adaptive Card attachments list."""
     notifier = TeamsNotifier("https://example.com/webhook")
     payload = notifier._build_payload("Test", "Attention")
-    assert "attachments" in payload
-    assert len(payload["attachments"]) == 1
+    assert "attachments" not in payload
 
 
-def test_payload_attachment_content_type():
+def test_payload_text_contains_header():
+    """The text body must include the dashboard header line."""
     notifier = TeamsNotifier("https://example.com/webhook")
     payload = notifier._build_payload("Test", "Attention")
-    att = payload["attachments"][0]
-    assert att["contentType"] == "application/vnd.microsoft.card.adaptive"
+    assert "Power Systems Dashboard" in payload["text"]
 
 
-def test_payload_adaptive_card_version():
+def test_payload_text_is_single_string():
+    """The entire payload must be a single-key dict with a string value."""
     notifier = TeamsNotifier("https://example.com/webhook")
     payload = notifier._build_payload("Test", "Attention")
-    card = payload["attachments"][0]["content"]
-    assert card["type"] == "AdaptiveCard"
-    assert card["version"] == "1.4"
+    assert len(payload) == 1
 
 
 def test_payload_body_contains_message():
     notifier = TeamsNotifier("https://example.com/webhook")
     payload = notifier._build_payload("UPPER LIMIT BREACH: voltage", "Attention")
-    body_texts = [block.get("text", "") for block in payload["attachments"][0]["content"]["body"]]
-    assert any("UPPER LIMIT BREACH" in t for t in body_texts)
+    assert "UPPER LIMIT BREACH: voltage" in payload["text"]
 
 
 def test_payload_color_applied():
+    """Attention → 🔴, Good → 🟢, Warning → 🟡 in the text body."""
     notifier = TeamsNotifier("https://example.com/webhook")
-    payload = notifier._build_payload("msg", "Good")
-    body = payload["attachments"][0]["content"]["body"]
-    colors = [block.get("color") for block in body if "color" in block]
-    assert "Good" in colors
+    assert "🔴" in notifier._build_payload("msg", "Attention")["text"]
+    assert "🟢" in notifier._build_payload("msg", "Good")["text"]
+    assert "🟡" in notifier._build_payload("msg", "Warning")["text"]
 
 
 # ------------------------------------------------------------------
